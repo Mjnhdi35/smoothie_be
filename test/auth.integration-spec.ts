@@ -83,6 +83,8 @@ describe('Auth Integration', () => {
       {
         publicKey: appConfigService.jwt.refreshPublicKey,
         algorithms: ['RS256'],
+        issuer: appConfigService.jwt.issuer,
+        audience: appConfigService.jwt.audience,
       },
     );
 
@@ -111,6 +113,8 @@ describe('Auth Integration', () => {
       {
         publicKey: appConfigService.jwt.refreshPublicKey,
         algorithms: ['RS256'],
+        issuer: appConfigService.jwt.issuer,
+        audience: appConfigService.jwt.audience,
       },
     );
 

@@ -21,6 +21,15 @@ import { RequestContextService } from './services/request-context.service';
 import type { JwtPayload } from './types/jwt-payload.type';
 
 const INVALID_REFRESH_TOKEN_MESSAGE = 'Refresh token is not valid';
+const INVALID_CREDENTIALS_MESSAGE = 'Invalid credentials';
+const GOOGLE_NOT_CONFIGURED_MESSAGE = 'Google login is not configured yet';
+const AUTH_EVENTS = {
+  LOGIN_FAILED: 'auth.login_failed',
+  LOGIN_SUCCESS: 'auth.login_success',
+  REFRESH_SUCCESS: 'auth.refresh_success',
+  REFRESH_REUSE_DETECTED: 'auth.refresh_reuse_detected',
+  LOGOUT: 'auth.logout',
+} as const;
 
 interface RedisMultiLike {
   set(key: string, value: string, mode: 'EX', durationSeconds: number): this;
@@ -78,9 +87,7 @@ export class AuthService {
   ): Promise<AuthTokensDto> {
     switch (payload.provider ?? 'password') {
       case 'password':
-        if (!payload.email || !payload.password) {
-          throw new BadRequestException('Missing email or password');
-        }
+        this.assertPasswordLoginPayload(payload);
         return this.loginWithPassword(payload.email, payload.password, request);
       case 'google':
         return this.loginWithGoogle(payload.googleIdToken);
@@ -122,9 +129,7 @@ export class AuthService {
     }
 
     const session = await this.parseRefreshSession(existingSession, redis);
-    const hashMatches = safeEqual(session.tokenHash, sha256(refreshToken));
-
-    if (!hashMatches || session.userId !== payload.sub) {
+    if (!this.isRefreshSessionValid(session, payload.sub, refreshToken)) {
       await redis.unwatch();
       throw new UnauthorizedException(INVALID_REFRESH_TOKEN_MESSAGE);
     }
@@ -151,10 +156,10 @@ export class AuthService {
       throw new UnauthorizedException('Refresh token rotation failed');
     }
 
-    await this.usersService.writeAudit({
+    await this.writeAuthAudit({
+      request,
       userId: payload.sub,
-      event: 'auth.refresh_success',
-      ...this.requestContextService.getAuditContext(request),
+      event: AUTH_EVENTS.REFRESH_SUCCESS,
       metadata: { oldJti: payload.jti, newJti },
     });
 
@@ -171,10 +176,10 @@ export class AuthService {
       .srem(this.userSessionsKey(payload.sub), payload.jti)
       .exec();
 
-    await this.usersService.writeAudit({
+    await this.writeAuthAudit({
+      request,
       userId: payload.sub,
-      event: 'auth.logout',
-      ...this.requestContextService.getAuditContext(request),
+      event: AUTH_EVENTS.LOGOUT,
       metadata: { jti: payload.jti },
     });
   }
@@ -185,7 +190,6 @@ export class AuthService {
     request: Request,
   ): Promise<AuthTokensDto> {
     const normalizedEmail = this.passwordService.normalizeEmail(email);
-    const context = this.requestContextService.getAuditContext(request);
     const user = await this.usersService.findByEmail(normalizedEmail);
     const validPassword = await this.passwordService.verify(
       user?.passwordHash,
@@ -193,22 +197,22 @@ export class AuthService {
     );
 
     if (!user || !validPassword) {
-      await this.usersService.writeAudit({
+      await this.writeAuthAudit({
+        request,
         userId: user?.id ?? null,
-        event: 'auth.login_failed',
-        ...context,
+        event: AUTH_EVENTS.LOGIN_FAILED,
         metadata: { email: normalizedEmail },
       });
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
     }
 
     await this.resetBruteForceCounters(request, normalizedEmail);
     const tokens = await this.issueTokenPair(user.id);
 
-    await this.usersService.writeAudit({
+    await this.writeAuthAudit({
+      request,
       userId: user.id,
-      event: 'auth.login_success',
-      ...context,
+      event: AUTH_EVENTS.LOGIN_SUCCESS,
     });
 
     return tokens;
@@ -223,7 +227,7 @@ export class AuthService {
 
     // Placeholder for next step:
     // verify Google ID token, upsert local user, then issue token pair.
-    throw new BadRequestException('Google login is not configured yet');
+    throw new BadRequestException(GOOGLE_NOT_CONFIGURED_MESSAGE);
   }
 
   private async handleRefreshReuseDetection(
@@ -233,10 +237,10 @@ export class AuthService {
     this.logger.warn(`Refresh token replay detected for user ${payload.sub}`);
 
     await this.revokeAllSessionsForUser(payload.sub);
-    await this.usersService.writeAudit({
+    await this.writeAuthAudit({
+      request,
       userId: payload.sub,
-      event: 'auth.refresh_reuse_detected',
-      ...this.requestContextService.getAuditContext(request),
+      event: AUTH_EVENTS.REFRESH_REUSE_DETECTED,
       metadata: { jti: payload.jti },
     });
 
@@ -264,19 +268,25 @@ export class AuthService {
 
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(
-        { sub: userId, jti: randomUUID(), type: 'access' as const },
+        { jti: randomUUID(), type: 'access' as const },
         {
           privateKey: jwt.accessPrivateKey,
           algorithm: 'RS256',
           expiresIn: jwt.accessExpiresInSeconds,
+          subject: userId,
+          issuer: jwt.issuer,
+          audience: jwt.audience,
         },
       ),
       this.jwtService.signAsync(
-        { sub: userId, jti: refreshJti, type: 'refresh' as const },
+        { jti: refreshJti, type: 'refresh' as const },
         {
           privateKey: jwt.refreshPrivateKey,
           algorithm: 'RS256',
           expiresIn: jwt.refreshExpiresInSeconds,
+          subject: userId,
+          issuer: jwt.issuer,
+          audience: jwt.audience,
         },
       ),
     ]);
@@ -388,5 +398,38 @@ export class AuthService {
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
+  }
+
+  private assertPasswordLoginPayload(
+    payload: LoginDto,
+  ): asserts payload is LoginDto & { email: string; password: string } {
+    if (!payload.email || !payload.password) {
+      throw new BadRequestException('Missing email or password');
+    }
+  }
+
+  private isRefreshSessionValid(
+    session: RefreshSession,
+    userId: string,
+    refreshToken: string,
+  ): boolean {
+    return (
+      session.userId === userId &&
+      safeEqual(session.tokenHash, sha256(refreshToken))
+    );
+  }
+
+  private async writeAuthAudit(params: {
+    request: Request;
+    userId: string | null;
+    event: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
+    await this.usersService.writeAudit({
+      ...this.requestContextService.getAuditContext(params.request),
+      userId: params.userId,
+      event: params.event,
+      metadata: params.metadata,
+    });
   }
 }

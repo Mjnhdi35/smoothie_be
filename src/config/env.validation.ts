@@ -20,7 +20,14 @@ const POSTGRES_COMPONENT_KEYS = [
 ] as const;
 
 const REDIS_COMPONENT_KEYS = ['REDIS_HOST', 'REDIS_PORT', 'REDIS_TLS'] as const;
-const PINO_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace'] as const;
+const PINO_LEVELS = [
+  'fatal',
+  'error',
+  'warn',
+  'info',
+  'debug',
+  'trace',
+] as const;
 
 export type EnvShape = Record<string, string>;
 
@@ -37,7 +44,9 @@ export function validateEnv(config: Record<string, unknown>): EnvShape {
     (key) => !hasString(config[key]),
   );
 
-  const databaseUrl = hasString(config.DATABASE_URL) ? config.DATABASE_URL : undefined;
+  const databaseUrl = hasString(config.DATABASE_URL)
+    ? config.DATABASE_URL
+    : undefined;
   const redisUrl = hasString(config.REDIS_URL) ? config.REDIS_URL : undefined;
 
   if (databaseUrl) {
@@ -45,10 +54,14 @@ export function validateEnv(config: Record<string, unknown>): EnvShape {
       !databaseUrl.startsWith('postgres://') &&
       !databaseUrl.startsWith('postgresql://')
     ) {
-      throw new Error('DATABASE_URL must start with postgres:// or postgresql://');
+      throw new Error(
+        'DATABASE_URL must start with postgres:// or postgresql://',
+      );
     }
   } else {
-    missingKeys.push(...POSTGRES_COMPONENT_KEYS.filter((key) => !hasString(config[key])));
+    missingKeys.push(
+      ...POSTGRES_COMPONENT_KEYS.filter((key) => !hasString(config[key])),
+    );
   }
 
   if (redisUrl) {
@@ -56,11 +69,15 @@ export function validateEnv(config: Record<string, unknown>): EnvShape {
       throw new Error('REDIS_URL must start with redis:// or rediss://');
     }
   } else {
-    missingKeys.push(...REDIS_COMPONENT_KEYS.filter((key) => !hasString(config[key])));
+    missingKeys.push(
+      ...REDIS_COMPONENT_KEYS.filter((key) => !hasString(config[key])),
+    );
   }
 
   if (missingKeys.length > 0) {
-    throw new Error(`Missing required environment variables: ${missingKeys.join(', ')}`);
+    throw new Error(
+      `Missing required environment variables: ${missingKeys.join(', ')}`,
+    );
   }
 
   const integerKeys = ['PORT'];
@@ -78,7 +95,10 @@ export function validateEnv(config: Record<string, unknown>): EnvShape {
     }
   }
 
-  for (const key of ['LOGIN_RATE_LIMIT_MAX_ATTEMPTS', 'LOGIN_RATE_LIMIT_WINDOW_SECONDS']) {
+  for (const key of [
+    'LOGIN_RATE_LIMIT_MAX_ATTEMPTS',
+    'LOGIN_RATE_LIMIT_WINDOW_SECONDS',
+  ]) {
     if (!hasString(config[key])) {
       continue;
     }

@@ -47,5 +47,6 @@ Optional overrides (already have safe defaults in app):
 - `TRUST_PROXY` (default: `true` on production)
 - `PINO_LEVEL` (default: `info`)
 - `LOGIN_RATE_LIMIT_*` (default: `5` attempts / `900` seconds)
+- `JWT_ISSUER`, `JWT_AUDIENCE` (defaults: `api-smoothie`, `api-smoothie-users`)
 
 If you do not use Upstash, you can fallback to `REDIS_HOST`, `REDIS_PORT`, `REDIS_TLS` (and optional `REDIS_USERNAME`, `REDIS_PASSWORD`).

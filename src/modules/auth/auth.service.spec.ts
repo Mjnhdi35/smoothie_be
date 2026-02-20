@@ -61,6 +61,8 @@ describe('AuthService', () => {
       accessPublicKey: 'access-public',
       refreshPrivateKey: 'refresh-private',
       refreshPublicKey: 'refresh-public',
+      issuer: 'api-smoothie',
+      audience: 'api-smoothie-users',
       accessExpiresIn: '15m',
       refreshExpiresIn: '7d',
       accessExpiresInSeconds: 900,

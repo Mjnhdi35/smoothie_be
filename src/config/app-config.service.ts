@@ -91,6 +91,8 @@ export class AppConfigService {
     accessPublicKey: string;
     refreshPrivateKey: string;
     refreshPublicKey: string;
+    issuer: string;
+    audience: string;
     accessExpiresIn: string;
     refreshExpiresIn: string;
     accessExpiresInSeconds: number;
@@ -104,6 +106,8 @@ export class AppConfigService {
       accessPublicKey: this.normalizePem(this.get('JWT_ACCESS_PUBLIC_KEY')),
       refreshPrivateKey: this.normalizePem(this.get('JWT_REFRESH_PRIVATE_KEY')),
       refreshPublicKey: this.normalizePem(this.get('JWT_REFRESH_PUBLIC_KEY')),
+      issuer: this.getOptional('JWT_ISSUER') ?? 'api-smoothie',
+      audience: this.getOptional('JWT_AUDIENCE') ?? 'api-smoothie-users',
       accessExpiresIn,
       refreshExpiresIn,
       accessExpiresInSeconds: durationToSeconds(accessExpiresIn),
@@ -113,8 +117,12 @@ export class AppConfigService {
 
   get loginRateLimit(): { maxAttempts: number; windowSeconds: number } {
     return {
-      maxAttempts: Number(this.getOptional('LOGIN_RATE_LIMIT_MAX_ATTEMPTS') ?? '5'),
-      windowSeconds: Number(this.getOptional('LOGIN_RATE_LIMIT_WINDOW_SECONDS') ?? '900'),
+      maxAttempts: Number(
+        this.getOptional('LOGIN_RATE_LIMIT_MAX_ATTEMPTS') ?? '5',
+      ),
+      windowSeconds: Number(
+        this.getOptional('LOGIN_RATE_LIMIT_WINDOW_SECONDS') ?? '900',
+      ),
     };
   }
 
