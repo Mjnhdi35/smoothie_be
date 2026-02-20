@@ -21,6 +21,7 @@ CI is in `.github/workflows/ci.yml`:
 ## 3) Render Deploy
 
 Deploy workflow is manual only: `.github/workflows/deploy-render.yml`.
+Render `autoDeploy` should stay `false` to avoid duplicate deploys.
 
 Set GitHub repo secrets:
 
@@ -31,7 +32,7 @@ Run deploy:
 
 1. GitHub repo -> Actions -> `Deploy Render`
 2. Click `Run workflow`
-3. Workflow runs DB migration then triggers Render deploy hook
+3. Workflow runs DB migration (against `NEON_DATABASE_URL`), verifies migration status, then triggers Render deploy hook
 
 ## 4) Render Env Vars
 

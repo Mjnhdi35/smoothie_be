@@ -19,6 +19,8 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:integration": "jest --config ./test/jest-integration.json",
     "db:migrate": "node --env-file-if-exists=.env -r ts-node/register ./node_modules/knex/bin/cli.js --knexfile knexfile.ts migrate:latest",
+    "db:migrate:ci": "node -r ts-node/register ./node_modules/knex/bin/cli.js --knexfile knexfile.ts migrate:latest",
+    "db:migrate:status:ci": "node -r ts-node/register ./node_modules/knex/bin/cli.js --knexfile knexfile.ts migrate:status",
     "db:rollback": "node --env-file-if-exists=.env -r ts-node/register ./node_modules/knex/bin/cli.js --knexfile knexfile.ts migrate:rollback",
     "db:make": "node --env-file-if-exists=.env -r ts-node/register ./node_modules/knex/bin/cli.js --knexfile knexfile.ts migrate:make"
   },

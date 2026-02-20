@@ -15,7 +15,6 @@ import { RedisService } from './redis.service';
 const REDIS_CLIENT_OPTIONS = {
   lazyConnect: false,
   maxRetriesPerRequest: 3,
-  enableReadyCheck: true,
 } as const;
 
 @Injectable()
@@ -58,7 +57,11 @@ class RedisLifecycle implements OnModuleInit, OnApplicationShutdown {
         const redisConfig = appConfig.redis;
 
         if ('url' in redisConfig) {
-          return new Redis(redisConfig.url, REDIS_CLIENT_OPTIONS);
+          return new Redis(redisConfig.url, {
+            ...REDIS_CLIENT_OPTIONS,
+            // Upstash ACL commonly blocks INFO; disabling ready check avoids noisy warnings.
+            enableReadyCheck: false,
+          });
         }
 
         const { host, port, username, password, tls } = redisConfig;
@@ -69,6 +72,7 @@ class RedisLifecycle implements OnModuleInit, OnApplicationShutdown {
           ...(username ? { username } : {}),
           ...(password ? { password } : {}),
           tls: tls ? {} : undefined,
+          enableReadyCheck: true,
           ...REDIS_CLIENT_OPTIONS,
         });
       },
