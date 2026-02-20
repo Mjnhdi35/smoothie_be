@@ -106,6 +106,7 @@ export function validateEnv(config: Record<string, unknown>): EnvShape {
     'LOGIN_RATE_LIMIT_MAX_ATTEMPTS',
     'LOGIN_RATE_LIMIT_WINDOW_SECONDS',
     'BCRYPT_SALT_ROUNDS',
+    'REDIS_TIMEOUT_MS',
   ]) {
     if (!hasString(config[key])) {
       continue;
@@ -113,6 +114,16 @@ export function validateEnv(config: Record<string, unknown>): EnvShape {
     const value = Number(config[key]);
     if (!Number.isInteger(value) || value <= 0) {
       throw new Error(`${key} must be a positive integer`);
+    }
+  }
+
+  for (const key of ['REDIS_RETRY_ATTEMPTS', 'REDIS_RETRY_DELAY_MS']) {
+    if (!hasString(config[key])) {
+      continue;
+    }
+    const value = Number(config[key]);
+    if (!Number.isInteger(value) || value < 0) {
+      throw new Error(`${key} must be a non-negative integer`);
     }
   }
 

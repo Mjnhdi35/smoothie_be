@@ -13,7 +13,13 @@ type PostgresConfig =
       ssl: boolean;
     };
 
-type RedisConfig = { url: string; token: string };
+type RedisConfig = {
+  url: string;
+  token: string;
+  timeoutMs: number;
+  retryAttempts: number;
+  retryDelayMs: number;
+};
 
 @Injectable()
 export class AppConfigService {
@@ -69,9 +75,20 @@ export class AppConfigService {
   }
 
   get redis(): RedisConfig {
+    const timeoutMs = Number(this.getOptional('REDIS_TIMEOUT_MS') ?? '3500');
+    const retryAttempts = Number(
+      this.getOptional('REDIS_RETRY_ATTEMPTS') ?? '2',
+    );
+    const retryDelayMs = Number(
+      this.getOptional('REDIS_RETRY_DELAY_MS') ?? '150',
+    );
+
     return {
       url: this.get('UPSTASH_REDIS_REST_URL'),
       token: this.get('UPSTASH_REDIS_REST_TOKEN'),
+      timeoutMs: Number.isInteger(timeoutMs) ? timeoutMs : 3500,
+      retryAttempts: Number.isInteger(retryAttempts) ? retryAttempts : 2,
+      retryDelayMs: Number.isInteger(retryDelayMs) ? retryDelayMs : 150,
     };
   }
 

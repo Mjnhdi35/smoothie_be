@@ -18,6 +18,8 @@
     "test:cov": "jest --coverage",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "test:integration": "jest --config ./test/jest-integration.json",
+    "deps:upgrade": "pnpm up --latest",
+    "deps:refresh": "pnpm up --latest && pnpm dedupe",
     "docker:build": "docker build --target runtime -t api-smoothie:latest .",
     "docker:build:build-stage": "docker build --target build -t api-smoothie:build-stage .",
     "docker:run": "docker run --rm -p 3000:3000 --env-file .env api-smoothie:latest",
@@ -93,5 +95,10 @@
     ],
     "coverageDirectory": "../coverage",
     "testEnvironment": "node"
+  },
+  "packageManager": "pnpm@10.30.1",
+  "engines": {
+    "node": "22.x",
+    "pnpm": "10.x"
   }
 }

@@ -1,10 +1,11 @@
 node_modules
 dist
-.git
-.gitignore
+.pnpm-store
 coverage
+.git
+.github
 .env
 .env.*
+*.log
 README.md
-AGENTS.md
 test
