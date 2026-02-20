@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { AppController } from './app.controller';
 import { ResponseTimeInterceptor } from './common/interceptors/response-time.interceptor';
 import { RequestIdMiddleware } from './common/middlewares/request-id.middleware';
+import { HealthService } from './common/services/health.service';
 import { AppConfigService } from './config/app-config.service';
 import { AppConfigModule } from './config/config.module';
 import { validateEnv } from './config/env.validation';
@@ -69,7 +70,8 @@ function resolvePrettyTransport():
                 : undefined,
           }),
           autoLogging: {
-            ignore: (req: { url?: string }) => req.url === '/health',
+            ignore: (req: { url?: string }) =>
+              req.url === '/health' || req.url === '/health/ready',
           },
           genReqId: (req: { headers: Record<string, unknown> }) => {
             const fromHeader = req.headers['x-request-id'];
@@ -90,6 +92,7 @@ function resolvePrettyTransport():
   ],
   controllers: [AppController],
   providers: [
+    HealthService,
     {
       provide: APP_INTERCEPTOR,
       useClass: ResponseTimeInterceptor,

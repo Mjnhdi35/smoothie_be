@@ -19,6 +19,9 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
       RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+      RENDER_HEALTHCHECK_URL: ${{ secrets.RENDER_HEALTHCHECK_URL }}
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
 
     steps:
       - name: Checkout
@@ -32,6 +35,18 @@ jobs:
           fi
           if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
             echo "Missing secret: RENDER_DEPLOY_HOOK_URL"
+            exit 1
+          fi
+          if [ -z "$RENDER_HEALTHCHECK_URL" ]; then
+            echo "Missing secret: RENDER_HEALTHCHECK_URL"
+            exit 1
+          fi
+          if [ -z "$RENDER_API_KEY" ]; then
+            echo "Missing secret: RENDER_API_KEY"
+            exit 1
+          fi
+          if [ -z "$RENDER_SERVICE_ID" ]; then
+            echo "Missing secret: RENDER_SERVICE_ID"
             exit 1
           fi
 
@@ -57,3 +72,34 @@ jobs:
 
       - name: Trigger Render deploy
         run: curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL"
+
+      - name: Wait for deployment readiness
+        id: readiness
+        continue-on-error: true
+        run: |
+          echo "Checking $RENDER_HEALTHCHECK_URL ..."
+          for i in $(seq 1 30); do
+            status_code=$(curl -s -o /tmp/health_response.json -w "%{http_code}" "$RENDER_HEALTHCHECK_URL" || true)
+            if [ "$status_code" = "200" ]; then
+              echo "Service ready."
+              cat /tmp/health_response.json
+              exit 0
+            fi
+            echo "Attempt $i/30: healthcheck returned $status_code"
+            sleep 10
+          done
+          echo "Healthcheck failed after retries."
+          cat /tmp/health_response.json || true
+          exit 1
+
+      - name: Trigger automatic rollback
+        if: steps.readiness.outcome == 'failure'
+        run: |
+          curl -fsS \
+            -X POST \
+            -H "Authorization: Bearer $RENDER_API_KEY" \
+            "https://api.render.com/v1/services/$RENDER_SERVICE_ID/rollback"
+
+      - name: Fail deploy when readiness check fails
+        if: steps.readiness.outcome == 'failure'
+        run: exit 1

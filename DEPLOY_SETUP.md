@@ -27,12 +27,16 @@ Set GitHub repo secrets:
 
 - `NEON_DATABASE_URL`
 - `RENDER_DEPLOY_HOOK_URL`
+- `RENDER_HEALTHCHECK_URL` (example: `https://your-service.onrender.com/health/ready`)
+- `RENDER_API_KEY` (Render API token)
+- `RENDER_SERVICE_ID` (service id cần rollback)
 
 Run deploy:
 
 1. GitHub repo -> Actions -> `Deploy Render`
 2. Click `Run workflow`
-3. Workflow runs DB migration (against `NEON_DATABASE_URL`), verifies migration status, then triggers Render deploy hook
+3. Workflow runs DB migration (against `NEON_DATABASE_URL`), verifies migration status, triggers Render deploy hook, then waits until `/health/ready` returns `200`
+4. If readiness fails, workflow calls Render rollback API automatically
 
 ## 4) Render Env Vars
 
