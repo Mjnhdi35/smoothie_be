@@ -9,6 +9,10 @@ export function isRedisOperationalError(error: unknown): boolean {
     message.includes('noauth') ||
     message.includes('no permissions') ||
     message.includes('authentication required') ||
+    message.includes('timeout') ||
+    message.includes('fetch failed') ||
+    message.includes('upstash') ||
+    message.includes('timed out') ||
     message.includes('econnrefused') ||
     message.includes('etimedout') ||
     message.includes('eai_again')

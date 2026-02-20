@@ -13,7 +13,7 @@ type PostgresConfig =
       ssl: boolean;
     };
 
-type RedisConfig = { url: string };
+type RedisConfig = { url: string; token: string };
 
 @Injectable()
 export class AppConfigService {
@@ -69,7 +69,10 @@ export class AppConfigService {
   }
 
   get redis(): RedisConfig {
-    return { url: this.get('REDIS_URL') };
+    return {
+      url: this.get('UPSTASH_REDIS_REST_URL'),
+      token: this.get('UPSTASH_REDIS_REST_TOKEN'),
+    };
   }
 
   get jwt(): {

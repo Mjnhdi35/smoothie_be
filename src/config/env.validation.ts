@@ -43,7 +43,12 @@ export function validateEnv(config: Record<string, unknown>): EnvShape {
   const databaseUrl = hasString(config.DATABASE_URL)
     ? config.DATABASE_URL
     : undefined;
-  const redisUrl = hasString(config.REDIS_URL) ? config.REDIS_URL : undefined;
+  const upstashRedisRestUrl = hasString(config.UPSTASH_REDIS_REST_URL)
+    ? config.UPSTASH_REDIS_REST_URL
+    : undefined;
+  const upstashRedisRestToken = hasString(config.UPSTASH_REDIS_REST_TOKEN)
+    ? config.UPSTASH_REDIS_REST_TOKEN
+    : undefined;
 
   if (databaseUrl) {
     if (
@@ -60,13 +65,19 @@ export function validateEnv(config: Record<string, unknown>): EnvShape {
     );
   }
 
-  if (!redisUrl) {
-    missingKeys.push('REDIS_URL');
+  if (!upstashRedisRestUrl) {
+    missingKeys.push('UPSTASH_REDIS_REST_URL');
   } else if (
-    !redisUrl.startsWith('redis://') &&
-    !redisUrl.startsWith('rediss://')
+    !upstashRedisRestUrl.startsWith('https://') &&
+    !upstashRedisRestUrl.startsWith('http://')
   ) {
-    throw new Error('REDIS_URL must start with redis:// or rediss://');
+    throw new Error(
+      'UPSTASH_REDIS_REST_URL must start with https:// or http://',
+    );
+  }
+
+  if (!upstashRedisRestToken) {
+    missingKeys.push('UPSTASH_REDIS_REST_TOKEN');
   }
 
   if (missingKeys.length > 0) {

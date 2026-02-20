@@ -18,10 +18,9 @@ function makeRequest(userAgent = 'integration-agent'): Request {
 }
 
 async function clearRedisAuthKeys(redisService: RedisService): Promise<void> {
-  const redis = redisService.client;
-  const keys = await redis.keys('auth:*');
+  const keys = await redisService.keys('auth:*');
   if (keys.length > 0) {
-    await redis.del(...keys);
+    await redisService.del(...keys);
   }
 }
 

@@ -16,10 +16,8 @@ describe('LoginRateLimitGuard', () => {
   const expire = jest.fn();
 
   const redisService = {
-    client: {
-      incr,
-      expire,
-    },
+    incr,
+    expire,
   } as unknown as RedisService;
 
   const appConfigService = {

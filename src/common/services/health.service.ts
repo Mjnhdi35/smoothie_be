@@ -30,10 +30,7 @@ export class HealthService {
   }
 
   async readiness(): Promise<ReadinessPayload> {
-    await Promise.all([
-      this.db.raw('select 1'),
-      this.redisService.client.ping(),
-    ]);
+    await Promise.all([this.db.raw('select 1'), this.redisService.ping()]);
 
     return {
       ok: true,

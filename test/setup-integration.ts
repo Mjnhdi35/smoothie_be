@@ -20,7 +20,8 @@ setDefaultEnv(
   'postgresql://smoothie_user:smoothie_pass@127.0.0.1:5432/smoothie_db?sslmode=disable',
 );
 
-setDefaultEnv('REDIS_URL', 'redis://127.0.0.1:6379');
+setDefaultEnv('UPSTASH_REDIS_REST_URL', 'http://127.0.0.1:6379');
+setDefaultEnv('UPSTASH_REDIS_REST_TOKEN', 'test-token');
 
 setDefaultEnv('JWT_ACCESS_SECRET', accessSecret);
 setDefaultEnv('JWT_REFRESH_SECRET', refreshSecret);

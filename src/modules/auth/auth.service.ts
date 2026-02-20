@@ -7,6 +7,7 @@ import {
 import type { Request } from 'express';
 import { UsersService } from '../users/users.service';
 import type { UserEntity } from '../users/entities/user.entity';
+import { AUTH_EVENTS, AUTH_MESSAGES } from './auth.constants';
 import type { AuthMeDto } from './dto/auth-me.dto';
 import type { AuthTokensDto } from './dto/auth-tokens.dto';
 import type { LoginDto } from './dto/login.dto';
@@ -14,15 +15,6 @@ import { AuthAuditService } from './services/auth-audit.service';
 import { AuthSessionService } from './services/auth-session.service';
 import { PasswordService } from './services/password.service';
 import type { JwtPayload } from './types/jwt-payload.type';
-
-const INVALID_CREDENTIALS_MESSAGE = 'Invalid credentials';
-const AUTH_EVENTS = {
-  LOGIN_FAILED: 'auth.login_failed',
-  LOGIN_SUCCESS: 'auth.login_success',
-  REFRESH_SUCCESS: 'auth.refresh_success',
-  REFRESH_REUSE_DETECTED: 'auth.refresh_reuse_detected',
-  LOGOUT: 'auth.logout',
-} as const;
 
 type UsersAuthGateway = Pick<
   UsersService,
@@ -87,7 +79,7 @@ export class AuthService {
         event: AUTH_EVENTS.LOGIN_FAILED,
         metadata: { email: normalizedEmail },
       });
-      throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
+      throw new UnauthorizedException(AUTH_MESSAGES.INVALID_CREDENTIALS);
     }
 
     await this.authSessionService.resetBruteForceCounters(
@@ -129,7 +121,7 @@ export class AuthService {
         event: AUTH_EVENTS.REFRESH_REUSE_DETECTED,
         metadata: { jti: payload.jti },
       });
-      throw new UnauthorizedException('Refresh token reuse detected');
+      throw new UnauthorizedException(AUTH_MESSAGES.REFRESH_TOKEN_REUSE);
     }
 
     await this.authAuditService.write({

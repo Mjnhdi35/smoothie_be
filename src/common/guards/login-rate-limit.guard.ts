@@ -74,11 +74,10 @@ export class LoginRateLimitGuard implements CanActivate {
   }
 
   private async incrementCounter(key: string, ttl: number): Promise<number> {
-    const redis = this.redisService.client;
-    const count = await redis.incr(key);
+    const count = await this.redisService.incr(key);
 
     if (count === 1) {
-      await redis.expire(key, ttl);
+      await this.redisService.expire(key, ttl);
     }
 
     return count;
