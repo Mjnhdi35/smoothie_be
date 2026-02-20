@@ -1,12 +1,14 @@
-import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import type { Request } from 'express';
-import { AppConfigService } from '../../config/app-config.service';
-import { RedisService } from '../../infrastructure/redis/redis.service';
 import { UsersService } from '../users/users.service';
-import { PasswordService } from './services/password.service';
-import { RequestContextService } from './services/request-context.service';
 import { AuthService } from './auth.service';
-import { JwtService } from '@nestjs/jwt';
+import { PasswordService } from './services/password.service';
+import { AuthSessionService } from './services/auth-session.service';
+import { AuthAuditService } from './services/auth-audit.service';
 import type { JwtPayload } from './types/jwt-payload.type';
 
 function makeRequest(): Request {
@@ -18,98 +20,63 @@ function makeRequest(): Request {
 
 describe('AuthService', () => {
   const findByEmail = jest.fn();
+  const findById = jest.fn();
   const createUserWithAudit = jest.fn();
-  const writeAudit = jest.fn();
+  const deleteById = jest.fn();
   const usersService = {
     findByEmail,
-    findById: jest.fn(),
+    findById,
     createUserWithAudit,
-    writeAudit,
+    deleteById,
   } as unknown as UsersService;
 
-  const signAsync = jest.fn();
-  const jwtService = {
-    signAsync,
-  } as unknown as JwtService;
-
-  const redisMulti = {
-    set: jest.fn().mockReturnThis(),
-    sadd: jest.fn().mockReturnThis(),
-    srem: jest.fn().mockReturnThis(),
-    expire: jest.fn().mockReturnThis(),
-    del: jest.fn().mockReturnThis(),
-    exec: jest.fn(),
-  };
-
-  const redisDel = jest.fn();
-  const redisClient = {
-    multi: jest.fn(() => redisMulti),
-    del: redisDel,
-    watch: jest.fn(),
-    get: jest.fn(),
-    unwatch: jest.fn(),
-    exists: jest.fn(),
-  };
-
-  const redisService = {
-    client: redisClient,
-  } as unknown as RedisService;
-
-  const appConfigService = {
-    jwt: {
-      accessSecret: 'access-secret',
-      refreshSecret: 'refresh-secret',
-      issuer: 'api-smoothie',
-      audience: 'api-smoothie-users',
-      accessExpiresIn: '15m',
-      refreshExpiresIn: '7d',
-      accessExpiresInSeconds: 900,
-      refreshExpiresInSeconds: 604800,
-    },
-  } as AppConfigService;
-
+  const normalizeEmail = jest.fn();
+  const hashPassword = jest.fn();
+  const verifyPassword = jest.fn();
   const passwordService = {
-    normalizeEmail: jest.fn(),
-    hash: jest.fn(),
-    verify: jest.fn(),
+    normalizeEmail,
+    hash: hashPassword,
+    verify: verifyPassword,
   } as unknown as PasswordService;
 
-  const requestContextService = {
-    getAuditContext: jest.fn(),
-    getIp: jest.fn(),
-  } as unknown as RequestContextService;
+  const issueTokenPair = jest.fn();
+  const resetBruteForceCounters = jest.fn();
+  const rotateRefreshToken = jest.fn();
+  const logout = jest.fn();
+  const authSessionService = {
+    issueTokenPair,
+    resetBruteForceCounters,
+    rotateRefreshToken,
+    logout,
+  } as unknown as AuthSessionService;
+
+  const writeAudit = jest.fn();
+  const authAuditService = {
+    write: writeAudit,
+  } as unknown as AuthAuditService;
 
   const service = new AuthService(
     usersService,
-    jwtService,
-    redisService,
-    appConfigService,
     passwordService,
-    requestContextService,
+    authSessionService,
+    authAuditService,
   );
 
   beforeEach(() => {
     jest.clearAllMocks();
-    redisMulti.exec.mockResolvedValue([]);
-    redisDel.mockResolvedValue(1);
   });
 
   it('registers user and returns token pair', async () => {
-    (passwordService.normalizeEmail as jest.Mock).mockReturnValue(
-      'alice@example.com',
-    );
-    (passwordService.hash as jest.Mock).mockResolvedValue('hashed-password');
-    (requestContextService.getAuditContext as jest.Mock).mockReturnValue({
-      ip: '127.0.0.1',
-      userAgent: 'jest-agent',
-    });
+    normalizeEmail.mockReturnValue('alice@example.com');
+    hashPassword.mockResolvedValue('hashed-password');
     findByEmail.mockResolvedValue(null);
-    createUserWithAudit.mockResolvedValue({
-      id: 'user-1',
+    createUserWithAudit.mockResolvedValue({ id: 'user-1' });
+    issueTokenPair.mockResolvedValue({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      tokenType: 'Bearer',
+      expiresIn: 900,
     });
-    signAsync
-      .mockResolvedValueOnce('access-token')
-      .mockResolvedValueOnce('refresh-token');
 
     const result = await service.register(
       ' Alice@Example.com ',
@@ -132,14 +99,8 @@ describe('AuthService', () => {
   });
 
   it('throws conflict when registering existing email', async () => {
-    (passwordService.normalizeEmail as jest.Mock).mockReturnValue(
-      'alice@example.com',
-    );
-    (passwordService.hash as jest.Mock).mockResolvedValue('hashed-password');
-    (requestContextService.getAuditContext as jest.Mock).mockReturnValue({
-      ip: '127.0.0.1',
-      userAgent: 'jest-agent',
-    });
+    normalizeEmail.mockReturnValue('alice@example.com');
+    hashPassword.mockResolvedValue('hashed-password');
     findByEmail.mockResolvedValue({ id: 'user-1' });
 
     await expect(
@@ -151,16 +112,32 @@ describe('AuthService', () => {
     ).rejects.toBeInstanceOf(ConflictException);
   });
 
-  it('logs audit and throws unauthorized on invalid login', async () => {
-    (passwordService.normalizeEmail as jest.Mock).mockReturnValue(
-      'alice@example.com',
-    );
-    (requestContextService.getAuditContext as jest.Mock).mockReturnValue({
-      ip: '127.0.0.1',
-      userAgent: 'jest-agent',
-    });
+  it('rolls back created user when session service is unavailable', async () => {
+    normalizeEmail.mockReturnValue('alice@example.com');
+    hashPassword.mockResolvedValue('hashed-password');
     findByEmail.mockResolvedValue(null);
-    (passwordService.verify as jest.Mock).mockResolvedValue(false);
+    createUserWithAudit.mockResolvedValue({ id: 'user-1' });
+    issueTokenPair.mockRejectedValue(
+      new ServiceUnavailableException(
+        'Authentication service is temporarily unavailable',
+      ),
+    );
+
+    await expect(
+      service.register(
+        'alice@example.com',
+        'strong-password-123',
+        makeRequest(),
+      ),
+    ).rejects.toThrow('Authentication service is temporarily unavailable');
+
+    expect(deleteById).toHaveBeenCalledWith('user-1');
+  });
+
+  it('logs audit and throws unauthorized on invalid login', async () => {
+    normalizeEmail.mockReturnValue('alice@example.com');
+    findByEmail.mockResolvedValue(null);
+    verifyPassword.mockResolvedValue(false);
 
     await expect(
       service.login(
@@ -178,29 +155,28 @@ describe('AuthService', () => {
   });
 
   it('logs success and resets bruteforce counters on valid login', async () => {
-    (passwordService.normalizeEmail as jest.Mock).mockReturnValue(
-      'alice@example.com',
-    );
-    (requestContextService.getAuditContext as jest.Mock).mockReturnValue({
-      ip: '127.0.0.1',
-      userAgent: 'jest-agent',
-    });
-    (requestContextService.getIp as jest.Mock).mockReturnValue('127.0.0.1');
+    normalizeEmail.mockReturnValue('alice@example.com');
     findByEmail.mockResolvedValue({
       id: 'user-1',
       passwordHash: 'stored-hash',
     });
-    (passwordService.verify as jest.Mock).mockResolvedValue(true);
-    signAsync
-      .mockResolvedValueOnce('access-token')
-      .mockResolvedValueOnce('refresh-token');
+    verifyPassword.mockResolvedValue(true);
+    issueTokenPair.mockResolvedValue({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      tokenType: 'Bearer',
+      expiresIn: 900,
+    });
 
     await service.login(
       { email: 'alice@example.com', password: 'strong-password-123' },
       makeRequest(),
     );
 
-    expect(redisDel).toHaveBeenCalled();
+    expect(resetBruteForceCounters).toHaveBeenCalledWith(
+      '127.0.0.1',
+      'alice@example.com',
+    );
     expect(writeAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: 'user-1',
@@ -218,11 +194,9 @@ describe('AuthService', () => {
       exp: Math.floor(Date.now() / 1000) + 3600,
     } as JwtPayload;
 
-    redisClient.watch.mockResolvedValue(undefined);
-    redisClient.get.mockResolvedValue(
-      JSON.stringify({ userId: 'user-1', tokenHash: 'wrong-hash' }),
+    rotateRefreshToken.mockRejectedValue(
+      new UnauthorizedException('Refresh token is not valid'),
     );
-    redisClient.unwatch.mockResolvedValue(undefined);
 
     await expect(
       service.refresh(payload, 'refresh-token', makeRequest()),
@@ -237,7 +211,7 @@ describe('AuthService', () => {
       createdAt: new Date('2026-01-01T00:00:00.000Z'),
       updatedAt: new Date('2026-01-02T00:00:00.000Z'),
     };
-    (usersService.findById as jest.Mock).mockResolvedValue(user);
+    findById.mockResolvedValue(user);
 
     await expect(
       service.me({

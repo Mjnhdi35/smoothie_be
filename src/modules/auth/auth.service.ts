@@ -1,40 +1,21 @@
 import {
   ConflictException,
   Injectable,
-  Logger,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import type { Request } from 'express';
-import { randomUUID } from 'node:crypto';
-import { sha256, safeEqual } from '../../common/utils/crypto.util';
-import {
-  getErrorMessage,
-  isRedisOperationalError,
-} from '../../common/utils/redis-error.util';
-import { AppConfigService } from '../../config/app-config.service';
-import { RedisService } from '../../infrastructure/redis/redis.service';
 import { UsersService } from '../users/users.service';
 import type { UserEntity } from '../users/entities/user.entity';
 import type { AuthMeDto } from './dto/auth-me.dto';
 import type { AuthTokensDto } from './dto/auth-tokens.dto';
 import type { LoginDto } from './dto/login.dto';
+import { AuthAuditService } from './services/auth-audit.service';
+import { AuthSessionService } from './services/auth-session.service';
 import { PasswordService } from './services/password.service';
-import { RequestContextService } from './services/request-context.service';
 import type { JwtPayload } from './types/jwt-payload.type';
-import {
-  bruteForceEmailKey,
-  bruteForceIpKey,
-  refreshSessionKey,
-  usedRefreshSessionKey,
-  userRefreshSessionsKey,
-} from './utils/auth-redis-keys.util';
 
-const INVALID_REFRESH_TOKEN_MESSAGE = 'Refresh token is not valid';
 const INVALID_CREDENTIALS_MESSAGE = 'Invalid credentials';
-const AUTH_SERVICE_UNAVAILABLE_MESSAGE =
-  'Authentication service is temporarily unavailable';
 const AUTH_EVENTS = {
   LOGIN_FAILED: 'auth.login_failed',
   LOGIN_SUCCESS: 'auth.login_success',
@@ -43,32 +24,23 @@ const AUTH_EVENTS = {
   LOGOUT: 'auth.logout',
 } as const;
 
-interface RedisMultiLike {
-  set(key: string, value: string, mode: 'EX', durationSeconds: number): this;
-  sadd(key: string, member: string): this;
-  srem(key: string, member: string): this;
-  expire(key: string, durationSeconds: number): this;
-  del(key: string): this;
-  exec(): Promise<unknown>;
-}
-
-interface RefreshSession {
-  userId: string;
-  tokenHash: string;
-}
+type UsersAuthGateway = Pick<
+  UsersService,
+  'findByEmail' | 'findById' | 'createUserWithAudit' | 'deleteById'
+>;
 
 @Injectable()
 export class AuthService {
-  private readonly logger = new Logger(AuthService.name);
+  private readonly usersService: UsersAuthGateway;
 
   constructor(
-    private readonly usersService: UsersService,
-    private readonly jwtService: JwtService,
-    private readonly redisService: RedisService,
-    private readonly appConfigService: AppConfigService,
+    usersService: UsersService,
     private readonly passwordService: PasswordService,
-    private readonly requestContextService: RequestContextService,
-  ) {}
+    private readonly authSessionService: AuthSessionService,
+    private readonly authAuditService: AuthAuditService,
+  ) {
+    this.usersService = usersService;
+  }
 
   async register(
     email: string,
@@ -77,7 +49,7 @@ export class AuthService {
   ): Promise<AuthTokensDto> {
     const normalizedEmail = this.passwordService.normalizeEmail(email);
     const passwordHash = await this.passwordService.hash(password);
-    const context = this.requestContextService.getAuditContext(request);
+    const context = this.extractAuditContext(request);
 
     const existing = await this.usersService.findByEmail(normalizedEmail);
     if (existing) {
@@ -90,14 +62,45 @@ export class AuthService {
       ...context,
     });
 
-    return this.withRedisGuard(
-      () => this.issueTokenPair(user.id),
-      'register.issueTokenPair',
-    );
+    try {
+      return await this.authSessionService.issueTokenPair(user.id);
+    } catch (error) {
+      if (error instanceof ServiceUnavailableException) {
+        await this.usersService.deleteById(user.id);
+      }
+      throw error;
+    }
   }
 
   async login(payload: LoginDto, request: Request): Promise<AuthTokensDto> {
-    return this.loginWithPassword(payload.email, payload.password, request);
+    const normalizedEmail = this.passwordService.normalizeEmail(payload.email);
+    const user = await this.usersService.findByEmail(normalizedEmail);
+    const validPassword = await this.passwordService.verify(
+      user?.passwordHash,
+      payload.password,
+    );
+
+    if (!user || !validPassword) {
+      await this.authAuditService.write({
+        request,
+        userId: user?.id ?? null,
+        event: AUTH_EVENTS.LOGIN_FAILED,
+        metadata: { email: normalizedEmail },
+      });
+      throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
+    }
+
+    await this.authSessionService.resetBruteForceCounters(
+      request.ip ?? 'unknown',
+      normalizedEmail,
+    );
+    const tokens = await this.authSessionService.issueTokenPair(user.id);
+    await this.authAuditService.write({
+      request,
+      userId: user.id,
+      event: AUTH_EVENTS.LOGIN_SUCCESS,
+    });
+    return tokens;
   }
 
   async me(payload: JwtPayload): Promise<AuthMeDto> {
@@ -114,262 +117,52 @@ export class AuthService {
     refreshToken: string,
     request: Request,
   ): Promise<AuthTokensDto> {
-    return this.withRedisGuard(async () => {
-      const refreshKey = refreshSessionKey(payload.jti);
-      const usedKey = usedRefreshSessionKey(payload.jti);
-      const redis = this.redisService.client;
+    const result = await this.authSessionService.rotateRefreshToken(
+      payload,
+      refreshToken,
+    );
 
-      await redis.watch(refreshKey);
-      const existingSession = await redis.get(refreshKey);
-
-      if (!existingSession) {
-        await redis.unwatch();
-        const used = await redis.exists(usedKey);
-
-        if (used) {
-          await this.handleRefreshReuseDetection(payload, request);
-        }
-
-        throw new UnauthorizedException(INVALID_REFRESH_TOKEN_MESSAGE);
-      }
-
-      const session = await this.parseRefreshSession(existingSession, redis);
-      if (!this.isRefreshSessionValid(session, payload.sub, refreshToken)) {
-        await redis.unwatch();
-        throw new UnauthorizedException(INVALID_REFRESH_TOKEN_MESSAGE);
-      }
-
-      const newJti = randomUUID();
-      const newTokens = await this.signTokens(payload.sub, newJti);
-      const ttlSeconds = this.ttlFromExp(payload.exp);
-      const userSessionSetKey = userRefreshSessionsKey(payload.sub);
-
-      const multi = redis.multi();
-      multi.del(refreshKey);
-      multi.set(usedKey, '1', 'EX', ttlSeconds);
-      multi.srem(userSessionSetKey, payload.jti);
-
-      await this.persistRefreshToken({
-        userId: payload.sub,
-        jti: newJti,
-        refreshToken: newTokens.refreshToken,
-        multi,
-      });
-
-      const execResult = await multi.exec();
-      if (!execResult) {
-        throw new UnauthorizedException('Refresh token rotation failed');
-      }
-
-      await this.writeAuthAudit({
+    if (result.kind === 'reuse-detected') {
+      await this.authAuditService.write({
         request,
         userId: payload.sub,
-        event: AUTH_EVENTS.REFRESH_SUCCESS,
-        metadata: { oldJti: payload.jti, newJti },
+        event: AUTH_EVENTS.REFRESH_REUSE_DETECTED,
+        metadata: { jti: payload.jti },
       });
+      throw new UnauthorizedException('Refresh token reuse detected');
+    }
 
-      return newTokens;
-    }, 'refresh');
+    await this.authAuditService.write({
+      request,
+      userId: payload.sub,
+      event: AUTH_EVENTS.REFRESH_SUCCESS,
+      metadata: { oldJti: result.oldJti, newJti: result.newJti },
+    });
+
+    return result.tokens;
   }
 
   async logout(payload: JwtPayload, request: Request): Promise<void> {
-    await this.withRedisGuard(async () => {
-      const ttlSeconds = this.ttlFromExp(payload.exp);
-
-      await this.redisService.client
-        .multi()
-        .del(refreshSessionKey(payload.jti))
-        .set(usedRefreshSessionKey(payload.jti), '1', 'EX', ttlSeconds)
-        .srem(userRefreshSessionsKey(payload.sub), payload.jti)
-        .exec();
-
-      await this.writeAuthAudit({
-        request,
-        userId: payload.sub,
-        event: AUTH_EVENTS.LOGOUT,
-        metadata: { jti: payload.jti },
-      });
-    }, 'logout');
-  }
-
-  private async loginWithPassword(
-    email: string,
-    password: string,
-    request: Request,
-  ): Promise<AuthTokensDto> {
-    const normalizedEmail = this.passwordService.normalizeEmail(email);
-    const user = await this.usersService.findByEmail(normalizedEmail);
-    const validPassword = await this.passwordService.verify(
-      user?.passwordHash,
-      password,
-    );
-
-    if (!user || !validPassword) {
-      await this.writeAuthAudit({
-        request,
-        userId: user?.id ?? null,
-        event: AUTH_EVENTS.LOGIN_FAILED,
-        metadata: { email: normalizedEmail },
-      });
-      throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
-    }
-
-    await this.withRedisGuard(
-      () => this.resetBruteForceCounters(request, normalizedEmail),
-      'login.resetBruteForceCounters',
-    );
-    const tokens = await this.withRedisGuard(
-      () => this.issueTokenPair(user.id),
-      'login.issueTokenPair',
-    );
-
-    await this.writeAuthAudit({
-      request,
-      userId: user.id,
-      event: AUTH_EVENTS.LOGIN_SUCCESS,
-    });
-
-    return tokens;
-  }
-
-  private async handleRefreshReuseDetection(
-    payload: JwtPayload,
-    request: Request,
-  ): Promise<void> {
-    this.logger.warn(`Refresh token replay detected for user ${payload.sub}`);
-
-    await this.revokeAllSessionsForUser(payload.sub);
-    await this.writeAuthAudit({
+    await this.authSessionService.logout(payload);
+    await this.authAuditService.write({
       request,
       userId: payload.sub,
-      event: AUTH_EVENTS.REFRESH_REUSE_DETECTED,
+      event: AUTH_EVENTS.LOGOUT,
       metadata: { jti: payload.jti },
     });
-
-    throw new UnauthorizedException('Refresh token reuse detected');
   }
 
-  private async issueTokenPair(userId: string): Promise<AuthTokensDto> {
-    const jti = randomUUID();
-    const tokens = await this.signTokens(userId, jti);
-
-    await this.persistRefreshToken({
-      userId,
-      jti,
-      refreshToken: tokens.refreshToken,
-    });
-
-    return tokens;
-  }
-
-  private async signTokens(
-    userId: string,
-    refreshJti: string,
-  ): Promise<AuthTokensDto> {
-    const { jwt } = this.appConfigService;
-
-    const [accessToken, refreshToken] = await Promise.all([
-      this.jwtService.signAsync(
-        { jti: randomUUID(), type: 'access' as const },
-        {
-          secret: jwt.accessSecret,
-          algorithm: 'HS256',
-          expiresIn: jwt.accessExpiresInSeconds,
-          subject: userId,
-          issuer: jwt.issuer,
-          audience: jwt.audience,
-        },
-      ),
-      this.jwtService.signAsync(
-        { jti: refreshJti, type: 'refresh' as const },
-        {
-          secret: jwt.refreshSecret,
-          algorithm: 'HS256',
-          expiresIn: jwt.refreshExpiresInSeconds,
-          subject: userId,
-          issuer: jwt.issuer,
-          audience: jwt.audience,
-        },
-      ),
-    ]);
-
+  private extractAuditContext(request: Request): {
+    ip: string | null;
+    userAgent: string | null;
+  } {
     return {
-      accessToken,
-      refreshToken,
-      tokenType: 'Bearer',
-      expiresIn: jwt.accessExpiresInSeconds,
+      ip: request.ip ?? null,
+      userAgent:
+        typeof request.headers['user-agent'] === 'string'
+          ? request.headers['user-agent']
+          : null,
     };
-  }
-
-  private async persistRefreshToken(params: {
-    userId: string;
-    jti: string;
-    refreshToken: string;
-    multi?: RedisMultiLike;
-  }): Promise<void> {
-    const { userId, jti, refreshToken, multi } = params;
-    const refreshKey = refreshSessionKey(jti);
-    const userSessionSetKey = userRefreshSessionsKey(userId);
-    const ttl = this.appConfigService.jwt.refreshExpiresInSeconds;
-    const value = JSON.stringify({ userId, tokenHash: sha256(refreshToken) });
-
-    if (multi) {
-      multi.set(refreshKey, value, 'EX', ttl);
-      multi.sadd(userSessionSetKey, jti);
-      multi.expire(userSessionSetKey, ttl);
-      return;
-    }
-
-    await this.redisService.client
-      .multi()
-      .set(refreshKey, value, 'EX', ttl)
-      .sadd(userSessionSetKey, jti)
-      .expire(userSessionSetKey, ttl)
-      .exec();
-  }
-
-  private async revokeAllSessionsForUser(userId: string): Promise<void> {
-    const redis = this.redisService.client;
-    const userSessionSetKey = userRefreshSessionsKey(userId);
-    const sessions = await redis.smembers(userSessionSetKey);
-
-    if (sessions.length === 0) {
-      await redis.del(userSessionSetKey);
-      return;
-    }
-
-    const transaction = redis.multi();
-    for (const jti of sessions) {
-      transaction.del(refreshSessionKey(jti));
-    }
-    transaction.del(userSessionSetKey);
-
-    await transaction.exec();
-  }
-
-  private async resetBruteForceCounters(
-    request: Request,
-    email: string,
-  ): Promise<void> {
-    const ipKey = bruteForceIpKey(this.requestContextService.getIp(request));
-    const emailKey = bruteForceEmailKey(email);
-    await this.redisService.client.del(ipKey, emailKey);
-  }
-
-  private async parseRefreshSession(
-    session: string,
-    redis: { unwatch(): Promise<unknown> },
-  ): Promise<RefreshSession> {
-    try {
-      return JSON.parse(session) as RefreshSession;
-    } catch {
-      await redis.unwatch();
-      throw new UnauthorizedException(INVALID_REFRESH_TOKEN_MESSAGE);
-    }
-  }
-
-  private ttlFromExp(exp: number): number {
-    return Math.max(exp - Math.floor(Date.now() / 1000), 1);
   }
 
   private toAuthMe(user: UserEntity): AuthMeDto {
@@ -379,47 +172,5 @@ export class AuthService {
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
-  }
-
-  private isRefreshSessionValid(
-    session: RefreshSession,
-    userId: string,
-    refreshToken: string,
-  ): boolean {
-    return (
-      session.userId === userId &&
-      safeEqual(session.tokenHash, sha256(refreshToken))
-    );
-  }
-
-  private async writeAuthAudit(params: {
-    request: Request;
-    userId: string | null;
-    event: string;
-    metadata?: Record<string, unknown>;
-  }): Promise<void> {
-    await this.usersService.writeAudit({
-      ...this.requestContextService.getAuditContext(params.request),
-      userId: params.userId,
-      event: params.event,
-      metadata: params.metadata,
-    });
-  }
-
-  private async withRedisGuard<T>(
-    operation: () => Promise<T>,
-    operationName: string,
-  ): Promise<T> {
-    try {
-      return await operation();
-    } catch (error) {
-      if (!isRedisOperationalError(error)) {
-        throw error;
-      }
-      this.logger.error(
-        `Redis operation failed (${operationName}): ${getErrorMessage(error)}`,
-      );
-      throw new ServiceUnavailableException(AUTH_SERVICE_UNAVAILABLE_MESSAGE);
-    }
   }
 }

@@ -1,7 +1,11 @@
+import { AppConfigService } from '../../../config/app-config.service';
 import { PasswordService } from './password.service';
 
 describe('PasswordService', () => {
-  const service = new PasswordService();
+  const appConfigService = {
+    password: { saltRounds: 12 },
+  } as AppConfigService;
+  const service = new PasswordService(appConfigService);
 
   it('normalizes email', () => {
     expect(service.normalizeEmail('  Alice@Example.COM ')).toBe(

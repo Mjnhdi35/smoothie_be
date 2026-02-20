@@ -13,8 +13,7 @@ type PostgresConfig =
       ssl: boolean;
     };
 
-type RedisConfig =
-  | { url: string };
+type RedisConfig = { url: string };
 
 @Injectable()
 export class AppConfigService {
@@ -102,6 +101,17 @@ export class AppConfigService {
         this.getOptional('LOGIN_RATE_LIMIT_WINDOW_SECONDS') ?? '900',
       ),
     };
+  }
+
+  get password(): { saltRounds: number } {
+    const configuredRounds = Number(
+      this.getOptional('BCRYPT_SALT_ROUNDS') ?? '12',
+    );
+    const saltRounds = Number.isInteger(configuredRounds)
+      ? configuredRounds
+      : 12;
+
+    return { saltRounds: Math.min(Math.max(saltRounds, 8), 15) };
   }
 
   private get(key: string): string {

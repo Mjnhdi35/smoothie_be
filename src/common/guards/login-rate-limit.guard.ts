@@ -8,7 +8,10 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { AppConfigService } from '../../config/app-config.service';
-import { getErrorMessage, isRedisOperationalError } from '../utils/redis-error.util';
+import {
+  getErrorMessage,
+  isRedisOperationalError,
+} from '../utils/redis-error.util';
 import { RedisService } from '../../infrastructure/redis/redis.service';
 import {
   bruteForceEmailKey,

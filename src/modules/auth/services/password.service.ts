@@ -1,25 +1,32 @@
 import { Injectable } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
+import { AppConfigService } from '../../../config/app-config.service';
 
 @Injectable()
 export class PasswordService {
-  private static readonly SALT_ROUNDS = 12;
-  private static readonly FALLBACK_HASH =
-    '$2b$12$XSLWPuyQyBrjlBSs9ez8sOJX2fAByLhNfYcUfhziD3SxQjAFN9bBa';
+  private readonly saltRounds: number;
+
+  constructor(appConfigService: AppConfigService) {
+    this.saltRounds = appConfigService.password.saltRounds;
+  }
 
   normalizeEmail(email: string): string {
     return email.trim().toLowerCase();
   }
 
   hash(password: string): Promise<string> {
-    return bcrypt.hash(password, PasswordService.SALT_ROUNDS);
+    return bcrypt.hash(password, this.saltRounds);
   }
 
   async verify(
     storedHash: string | undefined,
     password: string,
   ): Promise<boolean> {
-    const hash = storedHash ?? PasswordService.FALLBACK_HASH;
-    return bcrypt.compare(password, hash).catch(() => false);
+    if (!storedHash) {
+      await bcrypt.hash(password, this.saltRounds);
+      return false;
+    }
+
+    return bcrypt.compare(password, storedHash).catch(() => false);
   }
 }

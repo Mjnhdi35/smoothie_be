@@ -25,6 +25,10 @@ export class UsersRepository {
     return row ? this.mapToEntity(row) : null;
   }
 
+  async deleteById(id: string): Promise<void> {
+    await this.db<UserRow>('users').where({ id }).del();
+  }
+
   async createUser(params: {
     email: string;
     passwordHash: string;

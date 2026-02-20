@@ -21,6 +21,10 @@ export class UsersService {
     return this.usersRepository.findById(id);
   }
 
+  async deleteById(id: string): Promise<void> {
+    await this.usersRepository.deleteById(id);
+  }
+
   async createUserWithAudit(params: {
     email: string;
     passwordHash: string;

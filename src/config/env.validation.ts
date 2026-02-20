@@ -90,6 +90,7 @@ export function validateEnv(config: Record<string, unknown>): EnvShape {
   for (const key of [
     'LOGIN_RATE_LIMIT_MAX_ATTEMPTS',
     'LOGIN_RATE_LIMIT_WINDOW_SECONDS',
+    'BCRYPT_SALT_ROUNDS',
   ]) {
     if (!hasString(config[key])) {
       continue;
