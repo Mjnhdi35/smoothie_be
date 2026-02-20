@@ -62,7 +62,13 @@ function resolvePrettyTransport():
           messageKey: 'message',
           level: appConfigService.pinoLevel,
           timestamp: () => `,"time":"${new Date().toISOString()}"`,
-          redact: ['req.headers.authorization'],
+          redact: [
+            'req.headers.authorization',
+            'req.headers.cookie',
+            'res.headers["set-cookie"]',
+            'req.body.password',
+            'req.body.refreshToken',
+          ],
           customProps: (req: { id?: unknown }) => ({
             reqId:
               typeof req.id === 'string' || typeof req.id === 'number'
@@ -70,18 +76,35 @@ function resolvePrettyTransport():
                 : undefined,
           }),
           autoLogging: {
-            ignore: (req: { url?: string }) =>
-              req.url === '/health' || req.url === '/health/ready',
+            ignore: (req: { url?: string; method?: string }) =>
+              req.url === '/health' ||
+              req.url === '/health/ready' ||
+              ((req.url === '/' ||
+                req.url === '/health' ||
+                req.url === '/health/ready') &&
+                req.method === 'HEAD'),
           },
+          customSuccessMessage: (
+            req: { method?: string; url?: string },
+            res: { statusCode?: number },
+            responseTime: number,
+          ) =>
+            `${req.method ?? 'UNKNOWN'} ${req.url ?? 'unknown'} -> ${res.statusCode ?? 0} (${responseTime}ms)`,
+          customErrorMessage: (
+            req: { method?: string; url?: string },
+            res: { statusCode?: number },
+            error: Error,
+          ) =>
+            `${req.method ?? 'UNKNOWN'} ${req.url ?? 'unknown'} -> ${res.statusCode ?? 0} failed: ${error.message}`,
           genReqId: (req: { headers: Record<string, unknown> }) => {
             const fromHeader = req.headers['x-request-id'];
             return typeof fromHeader === 'string' && fromHeader.length > 0
               ? fromHeader
               : randomUUID();
           },
-          transport: appConfigService.isProduction
-            ? undefined
-            : resolvePrettyTransport(),
+          transport: appConfigService.pinoPretty
+            ? resolvePrettyTransport()
+            : undefined,
         },
       }),
     }),

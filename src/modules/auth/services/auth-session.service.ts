@@ -1,12 +1,16 @@
 import {
   Injectable,
+  Logger,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import type Redis from 'ioredis';
 import { randomUUID } from 'node:crypto';
 import { sha256, safeEqual } from '../../../common/utils/crypto.util';
-import { isRedisOperationalError } from '../../../common/utils/redis-error.util';
+import {
+  getErrorMessage,
+  isRedisOperationalError,
+} from '../../../common/utils/redis-error.util';
 import { RedisService } from '../../../infrastructure/redis/redis.service';
 import type { AuthTokensDto } from '../dto/auth-tokens.dto';
 import type { JwtPayload } from '../types/jwt-payload.type';
@@ -43,6 +47,8 @@ type RefreshResult =
 
 @Injectable()
 export class AuthSessionService {
+  private readonly logger = new Logger(AuthSessionService.name);
+
   constructor(
     private readonly redisService: RedisService,
     private readonly authTokenService: AuthTokenService,
@@ -54,7 +60,7 @@ export class AuthSessionService {
       const tokens = await this.authTokenService.signTokenPair(userId, jti);
       await this.persistRefreshToken(userId, jti, tokens.refreshToken);
       return tokens;
-    });
+    }, 'issueTokenPair');
   }
 
   async rotateRefreshToken(
@@ -110,7 +116,7 @@ export class AuthSessionService {
       }
 
       return { kind: 'rotated', tokens, oldJti: payload.jti, newJti };
-    });
+    }, 'rotateRefreshToken');
   }
 
   async logout(payload: JwtPayload): Promise<void> {
@@ -122,7 +128,7 @@ export class AuthSessionService {
         .set(usedRefreshSessionKey(payload.jti), '1', 'EX', ttlSeconds)
         .srem(userRefreshSessionsKey(payload.sub), payload.jti)
         .exec();
-    });
+    }, 'logout');
   }
 
   async resetBruteForceCounters(ip: string, email: string): Promise<void> {
@@ -131,7 +137,7 @@ export class AuthSessionService {
         bruteForceIpKey(ip),
         bruteForceEmailKey(email),
       );
-    });
+    }, 'resetBruteForceCounters');
   }
 
   private async persistRefreshToken(
@@ -200,13 +206,19 @@ export class AuthSessionService {
     );
   }
 
-  private async withRedisGuard<T>(operation: () => Promise<T>): Promise<T> {
+  private async withRedisGuard<T>(
+    operation: () => Promise<T>,
+    operationName: string,
+  ): Promise<T> {
     try {
       return await operation();
     } catch (error) {
       if (!isRedisOperationalError(error)) {
         throw error;
       }
+      this.logger.error(
+        `Redis operation failed (${operationName}): ${getErrorMessage(error)}`,
+      );
       throw new ServiceUnavailableException(AUTH_SERVICE_UNAVAILABLE_MESSAGE);
     }
   }

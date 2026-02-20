@@ -37,20 +37,20 @@ export class HttpExceptionFilter implements ExceptionFilter {
             ? exception.message
             : 'Unexpected error';
 
-    const isInternalError = status === HttpStatus.INTERNAL_SERVER_ERROR;
+    const isServerError = status >= HttpStatus.INTERNAL_SERVER_ERROR;
     const requestId =
       typeof request.id === 'string' || typeof request.id === 'number'
         ? String(request.id)
         : undefined;
 
-    if (isInternalError && exception instanceof Error) {
+    if (isServerError && exception instanceof Error) {
       this.logger.error(
-        `[${requestId ?? 'unknown'}] ${request.method} ${request.url} failed: ${exception.message}`,
+        `[${requestId ?? 'unknown'}] ${request.method} ${request.url} failed (${status}): ${exception.message}`,
         exception.stack,
       );
-    } else if (isInternalError) {
+    } else if (isServerError) {
       this.logger.error(
-        `[${requestId ?? 'unknown'}] ${request.method} ${request.url} failed with non-Error exception`,
+        `[${requestId ?? 'unknown'}] ${request.method} ${request.url} failed (${status}) with non-Error exception`,
       );
     }
 

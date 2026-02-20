@@ -47,6 +47,11 @@ export class AppConfigService {
     return this.getOptional('PINO_LEVEL') ?? 'info';
   }
 
+  get pinoPretty(): boolean {
+    const value = this.getOptional('PINO_PRETTY');
+    return !this.isProduction && value === 'true';
+  }
+
   get postgres(): PostgresConfig {
     const url = this.getOptional('DATABASE_URL');
     if (url) {

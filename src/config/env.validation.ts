@@ -107,6 +107,9 @@ export function validateEnv(config: Record<string, unknown>): EnvShape {
   if (hasString(config.TRUST_PROXY) && !isBooleanString(config.TRUST_PROXY)) {
     throw new Error('TRUST_PROXY must be either "true" or "false"');
   }
+  if (hasString(config.PINO_PRETTY) && !isBooleanString(config.PINO_PRETTY)) {
+    throw new Error('PINO_PRETTY must be either "true" or "false"');
+  }
 
   if (
     hasString(config.PINO_LEVEL) &&

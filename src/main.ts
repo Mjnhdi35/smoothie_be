@@ -1,5 +1,4 @@
 import 'reflect-metadata';
-import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
@@ -37,7 +36,7 @@ async function bootstrap(): Promise<void> {
 
   await app.listen(appConfigService.port, '0.0.0.0');
 
-  Logger.log(`API started on port ${appConfigService.port}`, 'Bootstrap');
+  logger.log(`API started on port ${appConfigService.port}`);
 }
 
 void bootstrap();
