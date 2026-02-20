@@ -1,0 +1,237 @@
+import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import type { Request } from 'express';
+import { AppConfigService } from '../../config/app-config.service';
+import { RedisService } from '../../infrastructure/redis/redis.service';
+import { UsersService } from '../users/users.service';
+import { PasswordService } from './services/password.service';
+import { RequestContextService } from './services/request-context.service';
+import { AuthService } from './auth.service';
+import { JwtService } from '@nestjs/jwt';
+import type { JwtPayload } from './types/jwt-payload.type';
+
+function makeRequest(): Request {
+  return {
+    ip: '127.0.0.1',
+    headers: { 'user-agent': 'jest-agent' },
+  } as unknown as Request;
+}
+
+describe('AuthService', () => {
+  const findByEmail = jest.fn();
+  const createUserWithAudit = jest.fn();
+  const writeAudit = jest.fn();
+  const usersService = {
+    findByEmail,
+    createUserWithAudit,
+    writeAudit,
+  } as unknown as UsersService;
+
+  const signAsync = jest.fn();
+  const jwtService = {
+    signAsync,
+  } as unknown as JwtService;
+
+  const redisMulti = {
+    set: jest.fn().mockReturnThis(),
+    sadd: jest.fn().mockReturnThis(),
+    srem: jest.fn().mockReturnThis(),
+    expire: jest.fn().mockReturnThis(),
+    del: jest.fn().mockReturnThis(),
+    exec: jest.fn(),
+  };
+
+  const redisDel = jest.fn();
+  const redisClient = {
+    multi: jest.fn(() => redisMulti),
+    del: redisDel,
+    watch: jest.fn(),
+    get: jest.fn(),
+    unwatch: jest.fn(),
+    exists: jest.fn(),
+  };
+
+  const redisService = {
+    client: redisClient,
+  } as unknown as RedisService;
+
+  const appConfigService = {
+    jwt: {
+      accessPrivateKey: 'access-private',
+      accessPublicKey: 'access-public',
+      refreshPrivateKey: 'refresh-private',
+      refreshPublicKey: 'refresh-public',
+      accessExpiresIn: '15m',
+      refreshExpiresIn: '7d',
+      accessExpiresInSeconds: 900,
+      refreshExpiresInSeconds: 604800,
+      fingerprintSecret: 'fingerprint-secret',
+    },
+  } as AppConfigService;
+
+  const passwordService = {
+    normalizeEmail: jest.fn(),
+    hash: jest.fn(),
+    verify: jest.fn(),
+  } as unknown as PasswordService;
+
+  const requestContextService = {
+    getAuditContext: jest.fn(),
+    getIp: jest.fn(),
+    computeFingerprint: jest.fn(),
+  } as unknown as RequestContextService;
+
+  const service = new AuthService(
+    usersService,
+    jwtService,
+    redisService,
+    appConfigService,
+    passwordService,
+    requestContextService,
+  );
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    redisMulti.exec.mockResolvedValue([]);
+    redisDel.mockResolvedValue(1);
+  });
+
+  it('registers user and returns token pair', async () => {
+    (passwordService.normalizeEmail as jest.Mock).mockReturnValue(
+      'alice@example.com',
+    );
+    (passwordService.hash as jest.Mock).mockResolvedValue('hashed-password');
+    (requestContextService.getAuditContext as jest.Mock).mockReturnValue({
+      ip: '127.0.0.1',
+      userAgent: 'jest-agent',
+    });
+    (requestContextService.computeFingerprint as jest.Mock).mockReturnValue(
+      'fp-hash',
+    );
+
+    findByEmail.mockResolvedValue(null);
+    createUserWithAudit.mockResolvedValue({
+      id: 'user-1',
+    });
+    signAsync
+      .mockResolvedValueOnce('access-token')
+      .mockResolvedValueOnce('refresh-token');
+
+    const result = await service.register(
+      ' Alice@Example.com ',
+      'strong-password-123',
+      makeRequest(),
+    );
+
+    expect(createUserWithAudit).toHaveBeenCalledWith({
+      email: 'alice@example.com',
+      passwordHash: 'hashed-password',
+      ip: '127.0.0.1',
+      userAgent: 'jest-agent',
+    });
+    expect(result).toMatchObject({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      tokenType: 'Bearer',
+      expiresIn: 900,
+    });
+  });
+
+  it('throws conflict when registering existing email', async () => {
+    (passwordService.normalizeEmail as jest.Mock).mockReturnValue(
+      'alice@example.com',
+    );
+    (passwordService.hash as jest.Mock).mockResolvedValue('hashed-password');
+    (requestContextService.getAuditContext as jest.Mock).mockReturnValue({
+      ip: '127.0.0.1',
+      userAgent: 'jest-agent',
+    });
+    findByEmail.mockResolvedValue({ id: 'user-1' });
+
+    await expect(
+      service.register(
+        'alice@example.com',
+        'strong-password-123',
+        makeRequest(),
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('logs audit and throws unauthorized on invalid login', async () => {
+    (passwordService.normalizeEmail as jest.Mock).mockReturnValue(
+      'alice@example.com',
+    );
+    (requestContextService.getAuditContext as jest.Mock).mockReturnValue({
+      ip: '127.0.0.1',
+      userAgent: 'jest-agent',
+    });
+    findByEmail.mockResolvedValue(null);
+    (passwordService.verify as jest.Mock).mockResolvedValue(false);
+
+    await expect(
+      service.login('alice@example.com', 'wrong-password', makeRequest()),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    expect(writeAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'auth.login_failed',
+        metadata: { email: 'alice@example.com' },
+      }),
+    );
+  });
+
+  it('logs success and resets bruteforce counters on valid login', async () => {
+    (passwordService.normalizeEmail as jest.Mock).mockReturnValue(
+      'alice@example.com',
+    );
+    (requestContextService.getAuditContext as jest.Mock).mockReturnValue({
+      ip: '127.0.0.1',
+      userAgent: 'jest-agent',
+    });
+    (requestContextService.getIp as jest.Mock).mockReturnValue('127.0.0.1');
+    (requestContextService.computeFingerprint as jest.Mock).mockReturnValue(
+      'fp-hash',
+    );
+
+    findByEmail.mockResolvedValue({
+      id: 'user-1',
+      passwordHash: 'stored-hash',
+    });
+    (passwordService.verify as jest.Mock).mockResolvedValue(true);
+    signAsync
+      .mockResolvedValueOnce('access-token')
+      .mockResolvedValueOnce('refresh-token');
+
+    await service.login(
+      'alice@example.com',
+      'strong-password-123',
+      makeRequest(),
+    );
+
+    expect(redisDel).toHaveBeenCalled();
+    expect(writeAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        event: 'auth.login_success',
+      }),
+    );
+  });
+
+  it('rejects refresh when fingerprint mismatches', async () => {
+    (requestContextService.computeFingerprint as jest.Mock).mockReturnValue(
+      'actual-fp',
+    );
+
+    const payload = {
+      sub: 'user-1',
+      jti: 'jti-1',
+      fp: 'token-fp',
+      type: 'refresh',
+      iat: 1,
+      exp: 2,
+    } as JwtPayload;
+
+    await expect(
+      service.refresh(payload, 'refresh-token', makeRequest()),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+});

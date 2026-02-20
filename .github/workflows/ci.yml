@@ -6,8 +6,15 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test-and-build:
+  quality:
     runs-on: ubuntu-latest
 
     steps:
@@ -36,6 +43,3 @@ jobs:
 
       - name: Unit tests
         run: pnpm run test
-
-      - name: Docker build
-        run: docker build -t api_smoothie:${{ github.sha }} .

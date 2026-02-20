@@ -25,21 +25,21 @@ class DatabaseLifecycle implements OnApplicationShutdown {
       provide: KNEX_CONNECTION,
       inject: [AppConfigService],
       useFactory: (appConfig: AppConfigService): Knex => {
-        const { url, host, port, database, user, password, ssl } =
-          appConfig.postgres;
+        const postgres = appConfig.postgres;
 
         return knex({
           client: 'pg',
-          connection: url
-            ? url
-            : {
-                host,
-                port,
-                database,
-                user,
-                password,
-                ssl: ssl ? { rejectUnauthorized: true } : false,
-              },
+          connection:
+            'url' in postgres
+              ? postgres.url
+              : {
+                  host: postgres.host,
+                  port: postgres.port,
+                  database: postgres.database,
+                  user: postgres.user,
+                  password: postgres.password,
+                  ssl: postgres.ssl ? { rejectUnauthorized: true } : false,
+                },
           pool: {
             min: 2,
             max: 20,

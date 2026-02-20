@@ -45,6 +45,18 @@ export function validateEnv(config: Record<string, unknown>): EnvShape {
     typeof config.DATABASE_URL === 'string' &&
     config.DATABASE_URL.trim().length > 0;
 
+  if (hasDatabaseUrl) {
+    const databaseUrl = String(config.DATABASE_URL).trim();
+    if (
+      !databaseUrl.startsWith('postgres://') &&
+      !databaseUrl.startsWith('postgresql://')
+    ) {
+      throw new Error(
+        'DATABASE_URL must start with postgres:// or postgresql://',
+      );
+    }
+  }
+
   if (!hasDatabaseUrl) {
     const missingPostgresKeys = POSTGRES_COMPONENT_KEYS.filter((key) => {
       const value = config[key];

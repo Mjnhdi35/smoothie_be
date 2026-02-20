@@ -8,15 +8,13 @@ services:
     autoDeploy: true
     envVars:
       - key: NODE_ENV
-        value: production
-      - key: PORT
-        value: "10000"
+        sync: false
       - key: CORS_ORIGIN
         sync: false
       - key: TRUST_PROXY
-        value: "true"
+        sync: false
       - key: PINO_LEVEL
-        value: info
+        sync: false
       - key: DATABASE_URL
         sync: false
       - key: REDIS_HOST
@@ -38,12 +36,12 @@ services:
       - key: JWT_REFRESH_PUBLIC_KEY
         sync: false
       - key: JWT_ACCESS_EXPIRES_IN
-        value: 15m
+        sync: false
       - key: JWT_REFRESH_EXPIRES_IN
-        value: 7d
+        sync: false
       - key: JWT_FINGERPRINT_SECRET
         sync: false
       - key: LOGIN_RATE_LIMIT_MAX_ATTEMPTS
-        value: "5"
+        sync: false
       - key: LOGIN_RATE_LIMIT_WINDOW_SECONDS
-        value: "900"
+        sync: false

@@ -7,6 +7,8 @@ import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { AccessTokenGuard } from './guards/access-token.guard';
 import { RefreshTokenGuard } from './guards/refresh-token.guard';
+import { PasswordService } from './services/password.service';
+import { RequestContextService } from './services/request-context.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { RefreshJwtStrategy } from './strategies/refresh-jwt.strategy';
 
@@ -24,6 +26,8 @@ import { RefreshJwtStrategy } from './strategies/refresh-jwt.strategy';
     AccessTokenGuard,
     RefreshTokenGuard,
     LoginRateLimitGuard,
+    PasswordService,
+    RequestContextService,
   ],
   exports: [AccessTokenGuard, RefreshTokenGuard],
 })

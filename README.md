@@ -9,7 +9,7 @@ Production-grade authentication module built with NestJS 11, Express adapter, Kn
 - Redis-backed refresh sessions (`auth:refresh:<jti>`) with rotation and reuse detection
 - Fingerprint-bound refresh tokens (IP + User-Agent hash)
 - Brute-force protection and login rate limiting via Redis counters
-- Argon2id password hashing
+- Bcrypt password hashing
 - Audit log persistence (`audit_logs` table)
 - Structured logging with `nestjs-pino`
 - Strict validation and global exception filter (no stack leak)
@@ -129,13 +129,22 @@ curl -X POST http://localhost:3000/auth/logout \
 
 ## CI/CD (GitHub Actions + Render)
 
-- `CI` workflow (`.github/workflows/ci.yml`) runs lint, build, unit tests, and Docker build on PRs and pushes to `main`.
-- `Deploy Render` workflow (`.github/workflows/deploy-render.yml`) runs on push to `main`:
+- `CI` workflow (`.github/workflows/ci.yml`) is optimized for GitHub Free:
+  - PR/main: lint + build + unit tests
+- `Deploy Render` workflow (`.github/workflows/deploy-render.yml`) runs manually (`workflow_dispatch`):
   - runs Knex migrations using Neon URL
   - triggers Render deploy hook.
-- `render.yaml` provides a Render Blueprint with Docker runtime and required env variables.
+- `render.yaml` provides a Render Blueprint with Docker runtime and required env variable keys only (`sync: false`), so no runtime values are hardcoded in the public repo.
+- Quick setup guide: `DEPLOY_SETUP.md`
 
 Set these GitHub repository secrets:
 
 - `NEON_DATABASE_URL`
 - `RENDER_DEPLOY_HOOK_URL`
+
+## Testing
+
+- See `TESTING.md` for the full test matrix and execution guide.
+- Quick commands:
+  - `pnpm run test`
+  - `pnpm run test:integration`

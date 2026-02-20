@@ -2,6 +2,17 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { durationToSeconds } from '../common/utils/duration.util';
 
+type PostgresConfig =
+  | { url: string }
+  | {
+      host: string;
+      port: number;
+      database: string;
+      user: string;
+      password: string;
+      ssl: boolean;
+    };
+
 @Injectable()
 export class AppConfigService {
   constructor(private readonly configService: ConfigService) {}
@@ -33,30 +44,13 @@ export class AppConfigService {
     return this.get('PINO_LEVEL');
   }
 
-  get postgres(): {
-    url?: string;
-    host: string;
-    port: number;
-    database: string;
-    user: string;
-    password: string;
-    ssl: boolean;
-  } {
+  get postgres(): PostgresConfig {
     const url = this.getOptional('DATABASE_URL');
     if (url) {
-      return {
-        url,
-        host: '',
-        port: 0,
-        database: '',
-        user: '',
-        password: '',
-        ssl: true,
-      };
+      return { url };
     }
 
     return {
-      url: undefined,
       host: this.get('POSTGRES_HOST'),
       port: Number(this.get('POSTGRES_PORT')),
       database: this.get('POSTGRES_DB'),

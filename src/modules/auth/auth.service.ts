@@ -6,7 +6,6 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { randomUUID } from 'node:crypto';
-import * as argon2 from 'argon2';
 import type { Request } from 'express';
 import { AppConfigService } from '../../config/app-config.service';
 import { RedisService } from '../../infrastructure/redis/redis.service';
@@ -14,9 +13,8 @@ import { sha256, safeEqual } from '../../common/utils/crypto.util';
 import type { JwtPayload } from './types/jwt-payload.type';
 import type { AuthTokensDto } from './dto/auth-tokens.dto';
 import { UsersService } from '../users/users.service';
-
-const FALLBACK_HASH =
-  '$argon2id$v=19$m=65536,t=3,p=1$RGlzY2xvc2luZ1RpbWluZw$m4cJm4FSBCfyfMra7Hmkdo0q/m+6e7iYH6g8QpW3fLM';
+import { PasswordService } from './services/password.service';
+import { RequestContextService } from './services/request-context.service';
 
 interface RedisMultiLike {
   set(key: string, value: string, mode: 'EX', durationSeconds: number): this;
@@ -36,6 +34,8 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly redisService: RedisService,
     private readonly appConfigService: AppConfigService,
+    private readonly passwordService: PasswordService,
+    private readonly requestContextService: RequestContextService,
   ) {}
 
   async register(
@@ -43,9 +43,9 @@ export class AuthService {
     password: string,
     request: Request,
   ): Promise<AuthTokensDto> {
-    const normalizedEmail = this.normalizeEmail(email);
-    const passwordHash = await this.hashPassword(password);
-    const context = this.getRequestContext(request);
+    const normalizedEmail = this.passwordService.normalizeEmail(email);
+    const passwordHash = await this.passwordService.hash(password);
+    const context = this.requestContextService.getAuditContext(request);
 
     const existing = await this.usersService.findByEmail(normalizedEmail);
     if (existing) {
@@ -66,14 +66,14 @@ export class AuthService {
     password: string,
     request: Request,
   ): Promise<AuthTokensDto> {
-    const normalizedEmail = this.normalizeEmail(email);
-    const context = this.getRequestContext(request);
+    const normalizedEmail = this.passwordService.normalizeEmail(email);
+    const context = this.requestContextService.getAuditContext(request);
     const user = await this.usersService.findByEmail(normalizedEmail);
 
-    const hashedForVerify = user?.passwordHash ?? FALLBACK_HASH;
-    const validPassword = await argon2
-      .verify(hashedForVerify, password)
-      .catch(() => false);
+    const validPassword = await this.passwordService.verify(
+      user?.passwordHash,
+      password,
+    );
 
     if (!user || !validPassword) {
       await this.usersService.writeAudit({
@@ -184,7 +184,7 @@ export class AuthService {
     await this.usersService.writeAudit({
       userId: payload.sub,
       event: 'auth.refresh_success',
-      ...this.getRequestContext(request),
+      ...this.requestContextService.getAuditContext(request),
       metadata: { oldJti: payload.jti, newJti },
     });
 
@@ -207,7 +207,7 @@ export class AuthService {
     await this.usersService.writeAudit({
       userId: payload.sub,
       event: 'auth.logout',
-      ...this.getRequestContext(request),
+      ...this.requestContextService.getAuditContext(request),
       metadata: { jti: payload.jti },
     });
   }
@@ -223,7 +223,7 @@ export class AuthService {
     await this.usersService.writeAudit({
       userId: payload.sub,
       event: 'auth.refresh_reuse_detected',
-      ...this.getRequestContext(request),
+      ...this.requestContextService.getAuditContext(request),
       metadata: { jti: payload.jti },
     });
 
@@ -345,50 +345,17 @@ export class AuthService {
     request: Request,
     email: string,
   ): Promise<void> {
-    const ipKey = `auth:bruteforce:ip:${sha256(this.getRequestIp(request))}`;
+    const ipKey = `auth:bruteforce:ip:${sha256(this.requestContextService.getIp(request))}`;
     const emailKey = `auth:bruteforce:email:${sha256(email)}`;
 
     await this.redisService.client.del(ipKey, emailKey);
   }
 
-  private normalizeEmail(email: string): string {
-    return email.trim().toLowerCase();
-  }
-
-  private hashPassword(password: string): Promise<string> {
-    return argon2.hash(password, {
-      type: argon2.argon2id,
-      memoryCost: 65536,
-      timeCost: 3,
-      parallelism: 1,
-    });
-  }
-
-  private getRequestContext(request: Request): {
-    ip: string;
-    userAgent: string;
-  } {
-    return {
-      ip: this.getRequestIp(request),
-      userAgent: this.getUserAgent(request),
-    };
-  }
-
   private computeFingerprint(request: Request): string {
-    const ip = this.getRequestIp(request);
-    const userAgent = this.getUserAgent(request);
-    const secret = this.appConfigService.jwt.fingerprintSecret;
-
-    return sha256(`${secret}|${ip}|${userAgent}`);
-  }
-
-  private getRequestIp(request: Request): string {
-    return request.ip ?? 'unknown';
-  }
-
-  private getUserAgent(request: Request): string {
-    const userAgentHeader = request.headers['user-agent'];
-    return typeof userAgentHeader === 'string' ? userAgentHeader : 'unknown';
+    return this.requestContextService.computeFingerprint(
+      request,
+      this.appConfigService.jwt.fingerprintSecret,
+    );
   }
 
   private refreshKey(jti: string): string {
