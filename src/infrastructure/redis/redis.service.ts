@@ -45,12 +45,20 @@ export class RedisService {
 
   private async command<T>(...parts: string[]): Promise<T> {
     const path = parts.map((part) => encodeURIComponent(part)).join('/');
-    const response = await fetch(`${this.baseUrl}/${path}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-      },
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}/${path}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+        },
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Upstash REST request failed for ${this.baseUrl}: ${message}. Check UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN.`,
+      );
+    }
 
     const payload = (await response.json()) as {
       result?: T;
@@ -59,7 +67,8 @@ export class RedisService {
 
     if (!response.ok || payload.error) {
       throw new Error(
-        payload.error ?? `Upstash command failed (${response.status})`,
+        payload.error ??
+          `Upstash command failed (${response.status}) for ${this.baseUrl}`,
       );
     }
 

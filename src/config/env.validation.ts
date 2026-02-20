@@ -74,6 +74,10 @@ export function validateEnv(config: Record<string, unknown>): EnvShape {
     throw new Error(
       'UPSTASH_REDIS_REST_URL must start with https:// or http://',
     );
+  } else if (upstashRedisRestUrl.includes(':6379')) {
+    throw new Error(
+      'UPSTASH_REDIS_REST_URL looks like TCP endpoint (:6379). Use Upstash REST URL from dashboard, not rediss host.',
+    );
   }
 
   if (!upstashRedisRestToken) {
