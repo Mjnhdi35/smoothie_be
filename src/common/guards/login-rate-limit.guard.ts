@@ -8,8 +8,12 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { AppConfigService } from '../../config/app-config.service';
-import { sha256 } from '../utils/crypto.util';
+import { getErrorMessage, isRedisOperationalError } from '../utils/redis-error.util';
 import { RedisService } from '../../infrastructure/redis/redis.service';
+import {
+  bruteForceEmailKey,
+  bruteForceIpKey,
+} from '../../modules/auth/utils/auth-redis-keys.util';
 
 @Injectable()
 export class LoginRateLimitGuard implements CanActivate {
@@ -27,8 +31,8 @@ export class LoginRateLimitGuard implements CanActivate {
 
     const { maxAttempts, windowSeconds } = this.appConfigService.loginRateLimit;
 
-    const ipKey = `auth:bruteforce:ip:${sha256(ip)}`;
-    const emailKey = `auth:bruteforce:email:${sha256(email.toLowerCase())}`;
+    const ipKey = bruteForceIpKey(ip);
+    const emailKey = bruteForceEmailKey(email);
 
     let ipAttempts: number;
     let emailAttempts: number;
@@ -38,9 +42,9 @@ export class LoginRateLimitGuard implements CanActivate {
         this.incrementCounter(emailKey, windowSeconds),
       ]);
     } catch (error) {
-      if (this.isRedisOperationalError(error)) {
+      if (isRedisOperationalError(error)) {
         this.logger.warn(
-          `Skipping login rate limit due to Redis error: ${this.errorMessage(error)}`,
+          `Skipping login rate limit due to Redis error: ${getErrorMessage(error)}`,
         );
         return true;
       }
@@ -75,22 +79,5 @@ export class LoginRateLimitGuard implements CanActivate {
     }
 
     return count;
-  }
-
-  private isRedisOperationalError(error: unknown): boolean {
-    const message = this.errorMessage(error).toLowerCase();
-    return (
-      message.includes('noperm') ||
-      message.includes('noauth') ||
-      message.includes('no permissions') ||
-      message.includes('authentication required') ||
-      message.includes('econnrefused') ||
-      message.includes('etimedout') ||
-      message.includes('eai_again')
-    );
-  }
-
-  private errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
   }
 }

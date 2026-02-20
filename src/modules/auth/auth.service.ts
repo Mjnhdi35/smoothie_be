@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
@@ -10,6 +9,10 @@ import { JwtService } from '@nestjs/jwt';
 import type { Request } from 'express';
 import { randomUUID } from 'node:crypto';
 import { sha256, safeEqual } from '../../common/utils/crypto.util';
+import {
+  getErrorMessage,
+  isRedisOperationalError,
+} from '../../common/utils/redis-error.util';
 import { AppConfigService } from '../../config/app-config.service';
 import { RedisService } from '../../infrastructure/redis/redis.service';
 import { UsersService } from '../users/users.service';
@@ -20,6 +23,13 @@ import type { LoginDto } from './dto/login.dto';
 import { PasswordService } from './services/password.service';
 import { RequestContextService } from './services/request-context.service';
 import type { JwtPayload } from './types/jwt-payload.type';
+import {
+  bruteForceEmailKey,
+  bruteForceIpKey,
+  refreshSessionKey,
+  usedRefreshSessionKey,
+  userRefreshSessionsKey,
+} from './utils/auth-redis-keys.util';
 
 const INVALID_REFRESH_TOKEN_MESSAGE = 'Refresh token is not valid';
 const INVALID_CREDENTIALS_MESSAGE = 'Invalid credentials';
@@ -87,7 +97,6 @@ export class AuthService {
   }
 
   async login(payload: LoginDto, request: Request): Promise<AuthTokensDto> {
-    this.assertLoginPayload(payload);
     return this.loginWithPassword(payload.email, payload.password, request);
   }
 
@@ -106,8 +115,8 @@ export class AuthService {
     request: Request,
   ): Promise<AuthTokensDto> {
     return this.withRedisGuard(async () => {
-      const refreshKey = this.refreshKey(payload.jti);
-      const usedKey = this.usedRefreshKey(payload.jti);
+      const refreshKey = refreshSessionKey(payload.jti);
+      const usedKey = usedRefreshSessionKey(payload.jti);
       const redis = this.redisService.client;
 
       await redis.watch(refreshKey);
@@ -133,7 +142,7 @@ export class AuthService {
       const newJti = randomUUID();
       const newTokens = await this.signTokens(payload.sub, newJti);
       const ttlSeconds = this.ttlFromExp(payload.exp);
-      const userSessionSetKey = this.userSessionsKey(payload.sub);
+      const userSessionSetKey = userRefreshSessionsKey(payload.sub);
 
       const multi = redis.multi();
       multi.del(refreshKey);
@@ -169,9 +178,9 @@ export class AuthService {
 
       await this.redisService.client
         .multi()
-        .del(this.refreshKey(payload.jti))
-        .set(this.usedRefreshKey(payload.jti), '1', 'EX', ttlSeconds)
-        .srem(this.userSessionsKey(payload.sub), payload.jti)
+        .del(refreshSessionKey(payload.jti))
+        .set(usedRefreshSessionKey(payload.jti), '1', 'EX', ttlSeconds)
+        .srem(userRefreshSessionsKey(payload.sub), payload.jti)
         .exec();
 
       await this.writeAuthAudit({
@@ -299,8 +308,8 @@ export class AuthService {
     multi?: RedisMultiLike;
   }): Promise<void> {
     const { userId, jti, refreshToken, multi } = params;
-    const refreshKey = this.refreshKey(jti);
-    const userSessionSetKey = this.userSessionsKey(userId);
+    const refreshKey = refreshSessionKey(jti);
+    const userSessionSetKey = userRefreshSessionsKey(userId);
     const ttl = this.appConfigService.jwt.refreshExpiresInSeconds;
     const value = JSON.stringify({ userId, tokenHash: sha256(refreshToken) });
 
@@ -321,7 +330,7 @@ export class AuthService {
 
   private async revokeAllSessionsForUser(userId: string): Promise<void> {
     const redis = this.redisService.client;
-    const userSessionSetKey = this.userSessionsKey(userId);
+    const userSessionSetKey = userRefreshSessionsKey(userId);
     const sessions = await redis.smembers(userSessionSetKey);
 
     if (sessions.length === 0) {
@@ -331,7 +340,7 @@ export class AuthService {
 
     const transaction = redis.multi();
     for (const jti of sessions) {
-      transaction.del(this.refreshKey(jti));
+      transaction.del(refreshSessionKey(jti));
     }
     transaction.del(userSessionSetKey);
 
@@ -342,18 +351,9 @@ export class AuthService {
     request: Request,
     email: string,
   ): Promise<void> {
-    const { ipKey, emailKey } = this.bruteForceKeys(request, email);
+    const ipKey = bruteForceIpKey(this.requestContextService.getIp(request));
+    const emailKey = bruteForceEmailKey(email);
     await this.redisService.client.del(ipKey, emailKey);
-  }
-
-  private bruteForceKeys(
-    request: Request,
-    email: string,
-  ): { ipKey: string; emailKey: string } {
-    return {
-      ipKey: `auth:bruteforce:ip:${sha256(this.requestContextService.getIp(request))}`,
-      emailKey: `auth:bruteforce:email:${sha256(email)}`,
-    };
   }
 
   private async parseRefreshSession(
@@ -368,18 +368,6 @@ export class AuthService {
     }
   }
 
-  private refreshKey(jti: string): string {
-    return `auth:refresh:${jti}`;
-  }
-
-  private usedRefreshKey(jti: string): string {
-    return `auth:refresh:used:${jti}`;
-  }
-
-  private userSessionsKey(userId: string): string {
-    return `auth:user_refresh:${userId}`;
-  }
-
   private ttlFromExp(exp: number): number {
     return Math.max(exp - Math.floor(Date.now() / 1000), 1);
   }
@@ -391,14 +379,6 @@ export class AuthService {
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
-  }
-
-  private assertLoginPayload(
-    payload: LoginDto,
-  ): asserts payload is LoginDto & { email: string; password: string } {
-    if (!payload.email || !payload.password) {
-      throw new BadRequestException('Missing email or password');
-    }
   }
 
   private isRefreshSessionValid(
@@ -433,30 +413,13 @@ export class AuthService {
     try {
       return await operation();
     } catch (error) {
-      if (!this.isRedisOperationalError(error)) {
+      if (!isRedisOperationalError(error)) {
         throw error;
       }
       this.logger.error(
-        `Redis operation failed (${operationName}): ${this.errorMessage(error)}`,
+        `Redis operation failed (${operationName}): ${getErrorMessage(error)}`,
       );
       throw new ServiceUnavailableException(AUTH_SERVICE_UNAVAILABLE_MESSAGE);
     }
-  }
-
-  private isRedisOperationalError(error: unknown): boolean {
-    const message = this.errorMessage(error).toLowerCase();
-    return (
-      message.includes('noperm') ||
-      message.includes('noauth') ||
-      message.includes('no permissions') ||
-      message.includes('authentication required') ||
-      message.includes('econnrefused') ||
-      message.includes('etimedout') ||
-      message.includes('eai_again')
-    );
-  }
-
-  private errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
   }
 }
