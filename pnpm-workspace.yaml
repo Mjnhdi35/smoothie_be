@@ -3,5 +3,4 @@ packages:
 
 onlyBuiltDependencies:
   - '@nestjs/core'
-  - bcrypt
   - unrs-resolver

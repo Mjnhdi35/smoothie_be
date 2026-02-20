@@ -134,17 +134,22 @@ curl -X POST http://localhost:3000/auth/logout \
 ## CI/CD (GitHub Actions + Render)
 
 - `CI` workflow (`.github/workflows/ci.yml`) is optimized for GitHub Free:
-  - PR/main: lint + build + unit tests
-- `Deploy Render` workflow (`.github/workflows/deploy-render.yml`) runs manually (`workflow_dispatch`):
+  - PR/main: lint + typecheck + build + unit tests + e2e
+- `Deploy Render` workflow (`.github/workflows/deploy-render.yml`) runs on push `main` and manual dispatch:
   - runs Knex migrations using Neon URL
-  - triggers Render deploy hook.
+  - verifies migration status
+  - triggers Render deploy hook
+  - checks `/health/ready` for up to ~2 minutes (non-blocking by default for Free tier cold starts)
+  - supports strict mode (`strict_readiness=true`) with automatic rollback via Render API
 - `render.yaml` provides a Render Blueprint with Docker runtime and required env variable keys only (`sync: false`), so no runtime values are hardcoded in the public repo.
-- Quick setup guide: `DEPLOY_SETUP.md`
 
 Set these GitHub repository secrets:
 
 - `NEON_DATABASE_URL`
 - `RENDER_DEPLOY_HOOK_URL`
+- `RENDER_HEALTHCHECK_URL`
+- `RENDER_API_KEY`
+- `RENDER_SERVICE_ID`
 
 ## Testing
 
