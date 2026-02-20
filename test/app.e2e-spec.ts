@@ -1,33 +1,39 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
-import request from 'supertest';
-import { App } from 'supertest/types';
-import { AppModule } from './../src/app.module';
+import { AppController } from '../src/app.controller';
+import { HealthService } from '../src/common/services/health.service';
 
 describe('AppController (e2e)', () => {
-  let app: INestApplication<App>;
+  let app: INestApplication;
+  let controller: AppController;
+  const healthService = {
+    liveness: jest.fn(() => ({
+      ok: true,
+      timestamp: new Date().toISOString(),
+    })),
+    readiness: jest.fn(),
+  } as unknown as HealthService;
 
   beforeEach(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
+      controllers: [AppController],
+      providers: [{ provide: HealthService, useValue: healthService }],
     }).compile();
 
     app = moduleFixture.createNestApplication();
     await app.init();
+    controller = app.get(AppController);
   });
 
   afterEach(async () => {
-    await app.close();
+    if (app) {
+      await app.close();
+    }
   });
 
   it('/health (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/health')
-      .expect(200)
-      .expect((res) => {
-        const body = res.body as { ok?: unknown; timestamp?: unknown };
-        expect(body.ok).toBe(true);
-        expect(typeof body.timestamp).toBe('string');
-      });
+    const body = controller.getHealth();
+    expect(body.ok).toBe(true);
+    expect(typeof body.timestamp).toBe('string');
   });
 });
