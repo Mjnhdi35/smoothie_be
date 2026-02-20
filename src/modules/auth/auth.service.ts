@@ -131,7 +131,7 @@ export class AuthService {
 
     const newJti = randomUUID();
     const newTokens = await this.signTokens(payload.sub, newJti);
-    const ttlSeconds = Math.max(payload.exp - Math.floor(Date.now() / 1000), 1);
+    const ttlSeconds = this.ttlFromExp(payload.exp);
     const userSessionSetKey = this.userSessionsKey(payload.sub);
 
     const multi = redis.multi();
@@ -162,7 +162,7 @@ export class AuthService {
   }
 
   async logout(payload: JwtPayload, request: Request): Promise<void> {
-    const ttlSeconds = Math.max(payload.exp - Math.floor(Date.now() / 1000), 1);
+    const ttlSeconds = this.ttlFromExp(payload.exp);
 
     await this.redisService.client
       .multi()
@@ -375,6 +375,10 @@ export class AuthService {
 
   private userSessionsKey(userId: string): string {
     return `auth:user_refresh:${userId}`;
+  }
+
+  private ttlFromExp(exp: number): number {
+    return Math.max(exp - Math.floor(Date.now() / 1000), 1);
   }
 
   private toAuthMe(user: UserEntity): AuthMeDto {

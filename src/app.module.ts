@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 import { randomUUID } from 'node:crypto';
 import { AppController } from './app.controller';
@@ -12,6 +12,37 @@ import { RedisModule } from './infrastructure/redis/redis.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 
+function resolvePrettyTransport():
+  | {
+      target: string;
+      options: {
+        colorize: boolean;
+        singleLine: boolean;
+        translateTime: string;
+        ignore: string;
+        messageFormat: string;
+      };
+    }
+  | undefined {
+  try {
+    require.resolve('pino-pretty');
+  } catch {
+    return undefined;
+  }
+
+  return {
+    target: 'pino-pretty',
+    options: {
+      colorize: true,
+      singleLine: true,
+      translateTime: 'SYS:standard',
+      ignore: 'pid,hostname,req,res,responseTime',
+      messageFormat:
+        '[{reqId}] {req.method} {req.url} -> {res.statusCode} ({responseTime}ms)',
+    },
+  };
+}
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -22,11 +53,8 @@ import { UsersModule } from './modules/users/users.module';
     }),
     AppConfigModule,
     LoggerModule.forRootAsync({
-      inject: [ConfigService, AppConfigService],
-      useFactory: (
-        configService: ConfigService,
-        appConfigService: AppConfigService,
-      ) => ({
+      inject: [AppConfigService],
+      useFactory: (appConfigService: AppConfigService) => ({
         pinoHttp: {
           messageKey: 'message',
           level: appConfigService.pinoLevel,
@@ -47,20 +75,9 @@ import { UsersModule } from './modules/users/users.module';
               ? fromHeader
               : randomUUID();
           },
-          transport:
-            appConfigService.nodeEnv === 'development'
-              ? {
-                  target: 'pino-pretty',
-                  options: {
-                    colorize: true,
-                    singleLine: true,
-                    translateTime: 'SYS:standard',
-                    ignore: 'pid,hostname,req,res,responseTime',
-                    messageFormat:
-                      '[{reqId}] {req.method} {req.url} -> {res.statusCode} ({responseTime}ms)',
-                  },
-                }
-              : undefined,
+          transport: appConfigService.isProduction
+            ? undefined
+            : resolvePrettyTransport(),
         },
       }),
     }),

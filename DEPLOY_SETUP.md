@@ -38,7 +38,14 @@ Run deploy:
 Use `render.yaml` for env keys and set real values in Render Dashboard:
 
 - `DATABASE_URL` (Neon)
-- `REDIS_*`
+- `REDIS_URL` (Upstash, `rediss://...`)
 - `JWT_*`
-- `CORS_ORIGIN`, `TRUST_PROXY`, `PINO_LEVEL`
-- `LOGIN_RATE_LIMIT_*`
+- `CORS_ORIGIN`
+
+Optional overrides (already have safe defaults in app):
+
+- `TRUST_PROXY` (default: `true` on production)
+- `PINO_LEVEL` (default: `info`)
+- `LOGIN_RATE_LIMIT_*` (default: `5` attempts / `900` seconds)
+
+If you do not use Upstash, you can fallback to `REDIS_HOST`, `REDIS_PORT`, `REDIS_TLS` (and optional `REDIS_USERNAME`, `REDIS_PASSWORD`).

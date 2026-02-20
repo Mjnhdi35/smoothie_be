@@ -13,6 +13,16 @@ type PostgresConfig =
       ssl: boolean;
     };
 
+type RedisConfig =
+  | { url: string }
+  | {
+      host: string;
+      port: number;
+      username?: string;
+      password?: string;
+      tls: boolean;
+    };
+
 @Injectable()
 export class AppConfigService {
   constructor(private readonly configService: ConfigService) {}
@@ -33,15 +43,16 @@ export class AppConfigService {
     return this.get('CORS_ORIGIN')
       .split(',')
       .map((origin) => origin.trim())
-      .filter((origin) => origin.length > 0);
+      .filter(Boolean);
   }
 
   get trustProxy(): boolean {
-    return this.get('TRUST_PROXY') === 'true';
+    const value = this.getOptional('TRUST_PROXY');
+    return value ? value === 'true' : this.isProduction;
   }
 
   get pinoLevel(): string {
-    return this.get('PINO_LEVEL');
+    return this.getOptional('PINO_LEVEL') ?? 'info';
   }
 
   get postgres(): PostgresConfig {
@@ -60,18 +71,17 @@ export class AppConfigService {
     };
   }
 
-  get redis(): {
-    host: string;
-    port: number;
-    username: string;
-    password: string;
-    tls: boolean;
-  } {
+  get redis(): RedisConfig {
+    const url = this.getOptional('REDIS_URL');
+    if (url) {
+      return { url };
+    }
+
     return {
       host: this.get('REDIS_HOST'),
       port: Number(this.get('REDIS_PORT')),
-      username: this.get('REDIS_USERNAME'),
-      password: this.get('REDIS_PASSWORD'),
+      username: this.getOptional('REDIS_USERNAME'),
+      password: this.getOptional('REDIS_PASSWORD'),
       tls: this.get('REDIS_TLS') === 'true',
     };
   }
@@ -103,18 +113,16 @@ export class AppConfigService {
 
   get loginRateLimit(): { maxAttempts: number; windowSeconds: number } {
     return {
-      maxAttempts: Number(this.get('LOGIN_RATE_LIMIT_MAX_ATTEMPTS')),
-      windowSeconds: Number(this.get('LOGIN_RATE_LIMIT_WINDOW_SECONDS')),
+      maxAttempts: Number(this.getOptional('LOGIN_RATE_LIMIT_MAX_ATTEMPTS') ?? '5'),
+      windowSeconds: Number(this.getOptional('LOGIN_RATE_LIMIT_WINDOW_SECONDS') ?? '900'),
     };
   }
 
   private get(key: string): string {
     const value = this.configService.get<string>(key);
-
     if (!value) {
       throw new Error(`Missing env key: ${key}`);
     }
-
     return value;
   }
 

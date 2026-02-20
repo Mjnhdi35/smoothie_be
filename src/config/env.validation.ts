@@ -2,21 +2,12 @@ const BASE_REQUIRED_ENV_KEYS = [
   'NODE_ENV',
   'PORT',
   'CORS_ORIGIN',
-  'TRUST_PROXY',
-  'REDIS_HOST',
-  'REDIS_PORT',
-  'REDIS_USERNAME',
-  'REDIS_PASSWORD',
-  'REDIS_TLS',
   'JWT_ACCESS_PRIVATE_KEY',
   'JWT_ACCESS_PUBLIC_KEY',
   'JWT_REFRESH_PRIVATE_KEY',
   'JWT_REFRESH_PUBLIC_KEY',
   'JWT_ACCESS_EXPIRES_IN',
   'JWT_REFRESH_EXPIRES_IN',
-  'LOGIN_RATE_LIMIT_MAX_ATTEMPTS',
-  'LOGIN_RATE_LIMIT_WINDOW_SECONDS',
-  'PINO_LEVEL',
 ] as const;
 
 const POSTGRES_COMPONENT_KEYS = [
@@ -28,56 +19,56 @@ const POSTGRES_COMPONENT_KEYS = [
   'POSTGRES_SSL',
 ] as const;
 
+const REDIS_COMPONENT_KEYS = ['REDIS_HOST', 'REDIS_PORT', 'REDIS_TLS'] as const;
+const PINO_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace'] as const;
+
 export type EnvShape = Record<string, string>;
+
+function hasString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
 
 function isBooleanString(value: string): boolean {
   return value === 'true' || value === 'false';
 }
 
 export function validateEnv(config: Record<string, unknown>): EnvShape {
-  const missingKeys: string[] = BASE_REQUIRED_ENV_KEYS.filter((key) => {
-    const value = config[key];
-    return typeof value !== 'string' || value.trim().length === 0;
-  });
+  const missingKeys: string[] = BASE_REQUIRED_ENV_KEYS.filter(
+    (key) => !hasString(config[key]),
+  );
 
-  const hasDatabaseUrl =
-    typeof config.DATABASE_URL === 'string' &&
-    config.DATABASE_URL.trim().length > 0;
+  const databaseUrl = hasString(config.DATABASE_URL) ? config.DATABASE_URL : undefined;
+  const redisUrl = hasString(config.REDIS_URL) ? config.REDIS_URL : undefined;
 
-  if (hasDatabaseUrl) {
-    const databaseUrl = String(config.DATABASE_URL).trim();
+  if (databaseUrl) {
     if (
       !databaseUrl.startsWith('postgres://') &&
       !databaseUrl.startsWith('postgresql://')
     ) {
-      throw new Error(
-        'DATABASE_URL must start with postgres:// or postgresql://',
-      );
+      throw new Error('DATABASE_URL must start with postgres:// or postgresql://');
     }
+  } else {
+    missingKeys.push(...POSTGRES_COMPONENT_KEYS.filter((key) => !hasString(config[key])));
   }
 
-  if (!hasDatabaseUrl) {
-    const missingPostgresKeys = POSTGRES_COMPONENT_KEYS.filter((key) => {
-      const value = config[key];
-      return typeof value !== 'string' || value.trim().length === 0;
-    });
-    missingKeys.push(...missingPostgresKeys);
+  if (redisUrl) {
+    if (!redisUrl.startsWith('redis://') && !redisUrl.startsWith('rediss://')) {
+      throw new Error('REDIS_URL must start with redis:// or rediss://');
+    }
+  } else {
+    missingKeys.push(...REDIS_COMPONENT_KEYS.filter((key) => !hasString(config[key])));
   }
 
   if (missingKeys.length > 0) {
-    throw new Error(
-      `Missing required environment variables: ${missingKeys.join(', ')}`,
-    );
+    throw new Error(`Missing required environment variables: ${missingKeys.join(', ')}`);
   }
 
-  const integerKeys = [
-    'PORT',
-    'REDIS_PORT',
-    'LOGIN_RATE_LIMIT_MAX_ATTEMPTS',
-    'LOGIN_RATE_LIMIT_WINDOW_SECONDS',
-  ];
-  if (!hasDatabaseUrl) {
+  const integerKeys = ['PORT'];
+  if (!databaseUrl) {
     integerKeys.push('POSTGRES_PORT');
+  }
+  if (!redisUrl) {
+    integerKeys.push('REDIS_PORT');
   }
 
   for (const key of integerKeys) {
@@ -87,25 +78,31 @@ export function validateEnv(config: Record<string, unknown>): EnvShape {
     }
   }
 
-  const booleanKeys = ['TRUST_PROXY', 'REDIS_TLS'];
-  if (!hasDatabaseUrl) {
-    booleanKeys.push('POSTGRES_SSL');
-  }
-
-  for (const key of booleanKeys) {
-    const value = String(config[key]);
-    if (!isBooleanString(value)) {
-      throw new Error(`${key} must be either "true" or "false"`);
+  for (const key of ['LOGIN_RATE_LIMIT_MAX_ATTEMPTS', 'LOGIN_RATE_LIMIT_WINDOW_SECONDS']) {
+    if (!hasString(config[key])) {
+      continue;
+    }
+    const value = Number(config[key]);
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new Error(`${key} must be a positive integer`);
     }
   }
 
-  const pinoLevel = String(config.PINO_LEVEL);
+  if (!databaseUrl && !isBooleanString(String(config.POSTGRES_SSL))) {
+    throw new Error('POSTGRES_SSL must be either "true" or "false"');
+  }
+  if (!redisUrl && !isBooleanString(String(config.REDIS_TLS))) {
+    throw new Error('REDIS_TLS must be either "true" or "false"');
+  }
+  if (hasString(config.TRUST_PROXY) && !isBooleanString(config.TRUST_PROXY)) {
+    throw new Error('TRUST_PROXY must be either "true" or "false"');
+  }
+
   if (
-    !['fatal', 'error', 'warn', 'info', 'debug', 'trace'].includes(pinoLevel)
+    hasString(config.PINO_LEVEL) &&
+    !PINO_LEVELS.includes(config.PINO_LEVEL as (typeof PINO_LEVELS)[number])
   ) {
-    throw new Error(
-      'PINO_LEVEL must be one of fatal,error,warn,info,debug,trace',
-    );
+    throw new Error(`PINO_LEVEL must be one of ${PINO_LEVELS.join(',')}`);
   }
 
   const normalized: EnvShape = {};
