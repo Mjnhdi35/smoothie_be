@@ -1,98 +1,141 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# API Smoothie Auth Service
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Production-grade authentication module built with NestJS 11, Express adapter, Knex, PostgreSQL 17 (or Neon), and Redis.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Features
 
-## Description
+- Clean module separation (`auth`, `users`, `infrastructure`, `common`, `config`)
+- RS256 JWT access (15m) + refresh (7d)
+- Redis-backed refresh sessions (`auth:refresh:<jti>`) with rotation and reuse detection
+- Fingerprint-bound refresh tokens (IP + User-Agent hash)
+- Brute-force protection and login rate limiting via Redis counters
+- Argon2id password hashing
+- Audit log persistence (`audit_logs` table)
+- Structured logging with `nestjs-pino`
+- Strict validation and global exception filter (no stack leak)
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## Project Structure
 
-## Project setup
-
-```bash
-$ pnpm install
+```text
+src/
+  modules/
+    auth/
+    users/
+  infrastructure/
+    database/
+    redis/
+  common/
+    guards/
+    filters/
+    decorators/
+  config/
+  main.ts
 ```
 
-## Compile and run the project
+## Setup
+
+1. Install dependencies:
 
 ```bash
-# development
-$ pnpm run start
-
-# watch mode
-$ pnpm run start:dev
-
-# production mode
-$ pnpm run start:prod
+pnpm install
 ```
 
-## Run tests
+2. Create environment:
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+cp .env.example .env
 ```
 
-## Deployment
+3. Generate RSA key pairs for access/refresh tokens and put them in `.env` with `\\n`-escaped line breaks.
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+4. Start infrastructure:
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+docker compose up -d
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+5. Run migrations:
 
-## Resources
+```bash
+pnpm run db:migrate
+```
 
-Check out a few resources that may come in handy when working with NestJS:
+6. Start API:
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+```bash
+pnpm run start:dev
+```
 
-## Support
+## API Endpoints
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+- `POST /auth/register`
+- `POST /auth/login`
+- `POST /auth/refresh`
+- `POST /auth/logout`
+- `GET /health`
 
-## Stay in touch
+## Example Requests
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+Register:
 
-## License
+```bash
+curl -X POST http://localhost:3000/auth/register \
+  -H 'Content-Type: application/json' \
+  -H 'User-Agent: smoothie-client/1.0' \
+  -d '{"email":"alice@example.com","password":"Str0ngPassw0rd!"}'
+```
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Login:
+
+```bash
+curl -X POST http://localhost:3000/auth/login \
+  -H 'Content-Type: application/json' \
+  -H 'User-Agent: smoothie-client/1.0' \
+  -d '{"email":"alice@example.com","password":"Str0ngPassw0rd!"}'
+```
+
+Refresh:
+
+```bash
+curl -X POST http://localhost:3000/auth/refresh \
+  -H 'Authorization: Bearer <REFRESH_TOKEN>' \
+  -H 'User-Agent: smoothie-client/1.0'
+```
+
+Logout:
+
+```bash
+curl -X POST http://localhost:3000/auth/logout \
+  -H 'Authorization: Bearer <REFRESH_TOKEN>' \
+  -H 'User-Agent: smoothie-client/1.0' \
+  -i
+```
+
+## Security Notes
+
+- Refresh tokens are stored server-side in Redis with TTL matching token expiration.
+- Refresh token rotation marks prior tokens as used and detects replay attempts.
+- On replay detection, all active refresh sessions for that user are revoked.
+- Login attempts are rate-limited per-IP and per-email hash.
+- Passwords are never logged or stored in plaintext.
+
+## Neon Postgres
+
+- You can use either:
+  - `DATABASE_URL` (recommended for Neon/managed Postgres)
+  - or `POSTGRES_*` variables.
+- Example Neon URL:
+  - `postgresql://user:password@host/dbname?sslmode=require`
+
+## CI/CD (GitHub Actions + Render)
+
+- `CI` workflow (`.github/workflows/ci.yml`) runs lint, build, unit tests, and Docker build on PRs and pushes to `main`.
+- `Deploy Render` workflow (`.github/workflows/deploy-render.yml`) runs on push to `main`:
+  - runs Knex migrations using Neon URL
+  - triggers Render deploy hook.
+- `render.yaml` provides a Render Blueprint with Docker runtime and required env variables.
+
+Set these GitHub repository secrets:
+
+- `NEON_DATABASE_URL`
+- `RENDER_DEPLOY_HOOK_URL`
