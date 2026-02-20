@@ -20,11 +20,7 @@ setDefaultEnv(
   'postgresql://smoothie_user:smoothie_pass@127.0.0.1:5432/smoothie_db?sslmode=disable',
 );
 
-setDefaultEnv('REDIS_HOST', '127.0.0.1');
-setDefaultEnv('REDIS_PORT', '6379');
-setDefaultEnv('REDIS_USERNAME', 'default');
-setDefaultEnv('REDIS_PASSWORD', 'smoothie_redis_pass');
-setDefaultEnv('REDIS_TLS', 'false');
+setDefaultEnv('REDIS_URL', 'redis://127.0.0.1:6379');
 
 setDefaultEnv('JWT_ACCESS_SECRET', accessSecret);
 setDefaultEnv('JWT_REFRESH_SECRET', refreshSecret);

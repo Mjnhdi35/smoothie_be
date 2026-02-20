@@ -15,6 +15,7 @@ import { RedisService } from './redis.service';
 const REDIS_CLIENT_OPTIONS = {
   lazyConnect: false,
   maxRetriesPerRequest: 3,
+  enableReadyCheck: false,
 } as const;
 
 @Injectable()
@@ -35,7 +36,7 @@ class RedisLifecycle implements OnModuleInit, OnApplicationShutdown {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes('NOAUTH')) {
         throw new Error(
-          'Redis authentication failed: set REDIS_URL (recommended) or REDIS_PASSWORD/REDIS_USERNAME correctly.',
+          'Redis authentication failed: check REDIS_URL credentials.',
         );
       }
       throw error;
@@ -54,27 +55,7 @@ class RedisLifecycle implements OnModuleInit, OnApplicationShutdown {
       provide: REDIS_CLIENT,
       inject: [AppConfigService],
       useFactory: (appConfig: AppConfigService): Redis => {
-        const redisConfig = appConfig.redis;
-
-        if ('url' in redisConfig) {
-          return new Redis(redisConfig.url, {
-            ...REDIS_CLIENT_OPTIONS,
-            // Upstash ACL commonly blocks INFO; disabling ready check avoids noisy warnings.
-            enableReadyCheck: false,
-          });
-        }
-
-        const { host, port, username, password, tls } = redisConfig;
-
-        return new Redis({
-          host,
-          port,
-          ...(username ? { username } : {}),
-          ...(password ? { password } : {}),
-          tls: tls ? {} : undefined,
-          enableReadyCheck: true,
-          ...REDIS_CLIENT_OPTIONS,
-        });
+        return new Redis(appConfig.redis.url, REDIS_CLIENT_OPTIONS);
       },
     },
     RedisLifecycle,

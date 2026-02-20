@@ -163,12 +163,8 @@ describe('AuthService', () => {
     (passwordService.verify as jest.Mock).mockResolvedValue(false);
 
     await expect(
-      service.loginByProvider(
-        {
-          provider: 'password',
-          email: 'alice@example.com',
-          password: 'wrong-password',
-        },
+      service.login(
+        { email: 'alice@example.com', password: 'wrong-password' },
         makeRequest(),
       ),
     ).rejects.toBeInstanceOf(UnauthorizedException);
@@ -199,12 +195,8 @@ describe('AuthService', () => {
       .mockResolvedValueOnce('access-token')
       .mockResolvedValueOnce('refresh-token');
 
-    await service.loginByProvider(
-      {
-        provider: 'password',
-        email: 'alice@example.com',
-        password: 'strong-password-123',
-      },
+    await service.login(
+      { email: 'alice@example.com', password: 'strong-password-123' },
       makeRequest(),
     );
 
@@ -235,15 +227,6 @@ describe('AuthService', () => {
     await expect(
       service.refresh(payload, 'refresh-token', makeRequest()),
     ).rejects.toBeInstanceOf(UnauthorizedException);
-  });
-
-  it('rejects google login when not configured', async () => {
-    await expect(
-      service.loginByProvider(
-        { provider: 'google', googleIdToken: 'dummy-google-id-token-value' },
-        makeRequest(),
-      ),
-    ).rejects.toThrow('Google login is not configured yet');
   });
 
   it('returns current user profile for me', async () => {

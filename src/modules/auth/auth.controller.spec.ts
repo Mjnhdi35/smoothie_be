@@ -8,7 +8,6 @@ describe('AuthController', () => {
   const authService = {
     register: jest.fn(),
     login: jest.fn(),
-    loginByProvider: jest.fn(),
     me: jest.fn(),
     refresh: jest.fn(),
     logout: jest.fn(),
@@ -34,14 +33,13 @@ describe('AuthController', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('delegates login to provider flow', async () => {
+  it('delegates login to auth service', async () => {
     const loginSpy = jest
-      .spyOn(authService, 'loginByProvider')
+      .spyOn(authService, 'login')
       .mockResolvedValue({} as never);
 
     await controller.login(
       {
-        provider: 'password',
         email: 'alice@example.com',
         password: 'SuperStrongPassword123!',
       },

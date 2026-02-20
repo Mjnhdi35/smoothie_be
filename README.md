@@ -90,13 +90,8 @@ Login:
 curl -X POST http://localhost:3000/auth/login \
   -H 'Content-Type: application/json' \
   -H 'User-Agent: smoothie-client/1.0' \
-  -d '{"provider":"password","email":"alice@example.com","password":"Str0ngPassw0rd!"}'
+  -d '{"email":"alice@example.com","password":"Str0ngPassw0rd!"}'
 ```
-
-`provider` currently supports:
-
-- `password` (active)
-- `google` (reserved; not configured yet)
 
 Refresh:
 

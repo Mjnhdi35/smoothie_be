@@ -16,8 +16,6 @@ const POSTGRES_COMPONENT_KEYS = [
   'POSTGRES_PASSWORD',
   'POSTGRES_SSL',
 ] as const;
-
-const REDIS_COMPONENT_KEYS = ['REDIS_HOST', 'REDIS_PORT', 'REDIS_TLS'] as const;
 const PINO_LEVELS = [
   'fatal',
   'error',
@@ -62,14 +60,13 @@ export function validateEnv(config: Record<string, unknown>): EnvShape {
     );
   }
 
-  if (redisUrl) {
-    if (!redisUrl.startsWith('redis://') && !redisUrl.startsWith('rediss://')) {
-      throw new Error('REDIS_URL must start with redis:// or rediss://');
-    }
-  } else {
-    missingKeys.push(
-      ...REDIS_COMPONENT_KEYS.filter((key) => !hasString(config[key])),
-    );
+  if (!redisUrl) {
+    missingKeys.push('REDIS_URL');
+  } else if (
+    !redisUrl.startsWith('redis://') &&
+    !redisUrl.startsWith('rediss://')
+  ) {
+    throw new Error('REDIS_URL must start with redis:// or rediss://');
   }
 
   if (missingKeys.length > 0) {
@@ -81,9 +78,6 @@ export function validateEnv(config: Record<string, unknown>): EnvShape {
   const integerKeys = ['PORT'];
   if (!databaseUrl) {
     integerKeys.push('POSTGRES_PORT');
-  }
-  if (!redisUrl) {
-    integerKeys.push('REDIS_PORT');
   }
 
   for (const key of integerKeys) {
@@ -108,9 +102,6 @@ export function validateEnv(config: Record<string, unknown>): EnvShape {
 
   if (!databaseUrl && !isBooleanString(String(config.POSTGRES_SSL))) {
     throw new Error('POSTGRES_SSL must be either "true" or "false"');
-  }
-  if (!redisUrl && !isBooleanString(String(config.REDIS_TLS))) {
-    throw new Error('REDIS_TLS must be either "true" or "false"');
   }
   if (hasString(config.TRUST_PROXY) && !isBooleanString(config.TRUST_PROXY)) {
     throw new Error('TRUST_PROXY must be either "true" or "false"');

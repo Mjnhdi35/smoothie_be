@@ -44,7 +44,7 @@ export class AuthController {
     @Body() body: LoginDto,
     @Req() request: Request,
   ): Promise<AuthTokensDto> {
-    return this.authService.loginByProvider(body, request);
+    return this.authService.login(body, request);
   }
 
   @UseGuards(AccessTokenGuard)

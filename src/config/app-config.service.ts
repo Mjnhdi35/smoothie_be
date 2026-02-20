@@ -14,14 +14,7 @@ type PostgresConfig =
     };
 
 type RedisConfig =
-  | { url: string }
-  | {
-      host: string;
-      port: number;
-      username?: string;
-      password?: string;
-      tls: boolean;
-    };
+  | { url: string };
 
 @Injectable()
 export class AppConfigService {
@@ -72,18 +65,7 @@ export class AppConfigService {
   }
 
   get redis(): RedisConfig {
-    const url = this.getOptional('REDIS_URL');
-    if (url) {
-      return { url };
-    }
-
-    return {
-      host: this.get('REDIS_HOST'),
-      port: Number(this.get('REDIS_PORT')),
-      username: this.getOptional('REDIS_USERNAME'),
-      password: this.getOptional('REDIS_PASSWORD'),
-      tls: this.get('REDIS_TLS') === 'true',
-    };
+    return { url: this.get('REDIS_URL') };
   }
 
   get jwt(): {

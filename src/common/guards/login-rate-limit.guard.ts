@@ -78,13 +78,15 @@ export class LoginRateLimitGuard implements CanActivate {
   }
 
   private isRedisOperationalError(error: unknown): boolean {
-    const message = this.errorMessage(error);
+    const message = this.errorMessage(error).toLowerCase();
     return (
-      message.includes('NOPERM') ||
-      message.includes('NOAUTH') ||
-      message.includes('ECONNREFUSED') ||
-      message.includes('ETIMEDOUT') ||
-      message.includes('EAI_AGAIN')
+      message.includes('noperm') ||
+      message.includes('noauth') ||
+      message.includes('no permissions') ||
+      message.includes('authentication required') ||
+      message.includes('econnrefused') ||
+      message.includes('etimedout') ||
+      message.includes('eai_again')
     );
   }
 

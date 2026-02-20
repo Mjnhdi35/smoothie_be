@@ -23,7 +23,6 @@ import type { JwtPayload } from './types/jwt-payload.type';
 
 const INVALID_REFRESH_TOKEN_MESSAGE = 'Refresh token is not valid';
 const INVALID_CREDENTIALS_MESSAGE = 'Invalid credentials';
-const GOOGLE_NOT_CONFIGURED_MESSAGE = 'Google login is not configured yet';
 const AUTH_SERVICE_UNAVAILABLE_MESSAGE =
   'Authentication service is temporarily unavailable';
 const AUTH_EVENTS = {
@@ -87,19 +86,9 @@ export class AuthService {
     );
   }
 
-  async loginByProvider(
-    payload: LoginDto,
-    request: Request,
-  ): Promise<AuthTokensDto> {
-    switch (payload.provider ?? 'password') {
-      case 'password':
-        this.assertPasswordLoginPayload(payload);
-        return this.loginWithPassword(payload.email, payload.password, request);
-      case 'google':
-        return this.loginWithGoogle(payload.googleIdToken);
-      default:
-        throw new BadRequestException('Unsupported auth provider');
-    }
+  async login(payload: LoginDto, request: Request): Promise<AuthTokensDto> {
+    this.assertLoginPayload(payload);
+    return this.loginWithPassword(payload.email, payload.password, request);
   }
 
   async me(payload: JwtPayload): Promise<AuthMeDto> {
@@ -232,18 +221,6 @@ export class AuthService {
     });
 
     return tokens;
-  }
-
-  private loginWithGoogle(
-    googleIdToken: string | undefined,
-  ): Promise<AuthTokensDto> {
-    if (!googleIdToken) {
-      throw new BadRequestException('Missing google id token');
-    }
-
-    // Placeholder for next step:
-    // verify Google ID token, upsert local user, then issue token pair.
-    throw new BadRequestException(GOOGLE_NOT_CONFIGURED_MESSAGE);
   }
 
   private async handleRefreshReuseDetection(
@@ -416,7 +393,7 @@ export class AuthService {
     };
   }
 
-  private assertPasswordLoginPayload(
+  private assertLoginPayload(
     payload: LoginDto,
   ): asserts payload is LoginDto & { email: string; password: string } {
     if (!payload.email || !payload.password) {
@@ -467,13 +444,15 @@ export class AuthService {
   }
 
   private isRedisOperationalError(error: unknown): boolean {
-    const message = this.errorMessage(error);
+    const message = this.errorMessage(error).toLowerCase();
     return (
-      message.includes('NOPERM') ||
-      message.includes('NOAUTH') ||
-      message.includes('ECONNREFUSED') ||
-      message.includes('ETIMEDOUT') ||
-      message.includes('EAI_AGAIN')
+      message.includes('noperm') ||
+      message.includes('noauth') ||
+      message.includes('no permissions') ||
+      message.includes('authentication required') ||
+      message.includes('econnrefused') ||
+      message.includes('etimedout') ||
+      message.includes('eai_again')
     );
   }
 
