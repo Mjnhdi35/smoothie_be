@@ -8,6 +8,8 @@ describe('AuthController', () => {
   const authService = {
     register: jest.fn(),
     login: jest.fn(),
+    loginByProvider: jest.fn(),
+    me: jest.fn(),
     refresh: jest.fn(),
     logout: jest.fn(),
   } as unknown as AuthService;
@@ -22,7 +24,6 @@ describe('AuthController', () => {
     const payload = {
       sub: 'u1',
       jti: 'j1',
-      fp: 'fp',
       type: 'refresh',
       iat: 1,
       exp: 2,
@@ -31,5 +32,42 @@ describe('AuthController', () => {
     await expect(
       controller.refresh(payload, {} as Request & { refreshToken?: string }),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('delegates login to provider flow', async () => {
+    const loginSpy = jest
+      .spyOn(authService, 'loginByProvider')
+      .mockResolvedValue({} as never);
+
+    await controller.login(
+      {
+        provider: 'password',
+        email: 'alice@example.com',
+        password: 'SuperStrongPassword123!',
+      },
+      {} as Request,
+    );
+
+    expect(loginSpy).toHaveBeenCalled();
+  });
+
+  it('delegates me to auth service', async () => {
+    const meSpy = jest.spyOn(authService, 'me').mockResolvedValue({
+      id: 'u1',
+      email: 'alice@example.com',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const payload = {
+      sub: 'u1',
+      jti: 'j1',
+      type: 'access',
+      iat: 1,
+      exp: 2,
+    } as JwtPayload;
+
+    await controller.me(payload);
+    expect(meSpy).toHaveBeenCalledWith(payload);
   });
 });

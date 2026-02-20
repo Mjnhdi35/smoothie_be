@@ -7,7 +7,6 @@ Production-grade authentication module built with NestJS 11, Express adapter, Kn
 - Clean module separation (`auth`, `users`, `infrastructure`, `common`, `config`)
 - RS256 JWT access (15m) + refresh (7d)
 - Redis-backed refresh sessions (`auth:refresh:<jti>`) with rotation and reuse detection
-- Fingerprint-bound refresh tokens (IP + User-Agent hash)
 - Brute-force protection and login rate limiting via Redis counters
 - Bcrypt password hashing
 - Audit log persistence (`audit_logs` table)
@@ -91,8 +90,13 @@ Login:
 curl -X POST http://localhost:3000/auth/login \
   -H 'Content-Type: application/json' \
   -H 'User-Agent: smoothie-client/1.0' \
-  -d '{"email":"alice@example.com","password":"Str0ngPassw0rd!"}'
+  -d '{"provider":"password","email":"alice@example.com","password":"Str0ngPassw0rd!"}'
 ```
+
+`provider` currently supports:
+
+- `password` (active)
+- `google` (reserved; not configured yet)
 
 Refresh:
 

@@ -63,7 +63,14 @@ describe('Auth Integration', () => {
     expect(registerTokens.accessToken).toBeDefined();
     expect(registerTokens.refreshToken).toBeDefined();
 
-    const loginTokens = await authService.login(email, password, request);
+    const loginTokens = await authService.loginByProvider(
+      {
+        provider: 'password',
+        email,
+        password,
+      },
+      request,
+    );
     expect(loginTokens).toEqual(
       expect.objectContaining({
         tokenType: 'Bearer',

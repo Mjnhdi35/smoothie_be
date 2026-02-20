@@ -4,6 +4,7 @@ import { LoggerModule } from 'nestjs-pino';
 import { randomUUID } from 'node:crypto';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { AppConfigService } from './config/app-config.service';
 import { AppConfigModule } from './config/config.module';
 import { validateEnv } from './config/env.validation';
 import { DatabaseModule } from './infrastructure/database/database.module';
@@ -21,11 +22,14 @@ import { UsersModule } from './modules/users/users.module';
     }),
     AppConfigModule,
     LoggerModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ({
+      inject: [ConfigService, AppConfigService],
+      useFactory: (
+        configService: ConfigService,
+        appConfigService: AppConfigService,
+      ) => ({
         pinoHttp: {
           messageKey: 'message',
-          level: configService.get<string>('PINO_LEVEL', 'info'),
+          level: appConfigService.pinoLevel,
           timestamp: () => `,"time":"${new Date().toISOString()}"`,
           redact: ['req.headers.authorization'],
           customProps: (req: { id?: unknown }) => ({
@@ -44,9 +48,8 @@ import { UsersModule } from './modules/users/users.module';
               : randomUUID();
           },
           transport:
-            configService.get<string>('NODE_ENV') === 'production'
-              ? undefined
-              : {
+            appConfigService.nodeEnv === 'development'
+              ? {
                   target: 'pino-pretty',
                   options: {
                     colorize: true,
@@ -56,7 +59,8 @@ import { UsersModule } from './modules/users/users.module';
                     messageFormat:
                       '[{reqId}] {req.method} {req.url} -> {res.statusCode} ({responseTime}ms)',
                   },
-                },
+                }
+              : undefined,
         },
       }),
     }),

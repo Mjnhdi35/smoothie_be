@@ -1,20 +1,26 @@
 import {
-  Injectable,
-  UnauthorizedException,
-  Logger,
+  BadRequestException,
   ConflictException,
+  Injectable,
+  Logger,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { randomUUID } from 'node:crypto';
 import type { Request } from 'express';
+import { randomUUID } from 'node:crypto';
+import { sha256, safeEqual } from '../../common/utils/crypto.util';
 import { AppConfigService } from '../../config/app-config.service';
 import { RedisService } from '../../infrastructure/redis/redis.service';
-import { sha256, safeEqual } from '../../common/utils/crypto.util';
-import type { JwtPayload } from './types/jwt-payload.type';
-import type { AuthTokensDto } from './dto/auth-tokens.dto';
 import { UsersService } from '../users/users.service';
+import type { UserEntity } from '../users/entities/user.entity';
+import type { AuthMeDto } from './dto/auth-me.dto';
+import type { AuthTokensDto } from './dto/auth-tokens.dto';
+import type { LoginDto } from './dto/login.dto';
 import { PasswordService } from './services/password.service';
 import { RequestContextService } from './services/request-context.service';
+import type { JwtPayload } from './types/jwt-payload.type';
+
+const INVALID_REFRESH_TOKEN_MESSAGE = 'Refresh token is not valid';
 
 interface RedisMultiLike {
   set(key: string, value: string, mode: 'EX', durationSeconds: number): this;
@@ -23,6 +29,11 @@ interface RedisMultiLike {
   expire(key: string, durationSeconds: number): this;
   del(key: string): this;
   exec(): Promise<unknown>;
+}
+
+interface RefreshSession {
+  userId: string;
+  tokenHash: string;
 }
 
 @Injectable()
@@ -58,10 +69,117 @@ export class AuthService {
       ...context,
     });
 
-    return this.issueTokenPair(user.id, request);
+    return this.issueTokenPair(user.id);
   }
 
-  async login(
+  async loginByProvider(
+    payload: LoginDto,
+    request: Request,
+  ): Promise<AuthTokensDto> {
+    switch (payload.provider ?? 'password') {
+      case 'password':
+        if (!payload.email || !payload.password) {
+          throw new BadRequestException('Missing email or password');
+        }
+        return this.loginWithPassword(payload.email, payload.password, request);
+      case 'google':
+        return this.loginWithGoogle(payload.googleIdToken);
+      default:
+        throw new BadRequestException('Unsupported auth provider');
+    }
+  }
+
+  async me(payload: JwtPayload): Promise<AuthMeDto> {
+    const user = await this.usersService.findById(payload.sub);
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    return this.toAuthMe(user);
+  }
+
+  async refresh(
+    payload: JwtPayload,
+    refreshToken: string,
+    request: Request,
+  ): Promise<AuthTokensDto> {
+    const refreshKey = this.refreshKey(payload.jti);
+    const usedKey = this.usedRefreshKey(payload.jti);
+    const redis = this.redisService.client;
+
+    await redis.watch(refreshKey);
+    const existingSession = await redis.get(refreshKey);
+
+    if (!existingSession) {
+      await redis.unwatch();
+      const used = await redis.exists(usedKey);
+
+      if (used) {
+        await this.handleRefreshReuseDetection(payload, request);
+      }
+
+      throw new UnauthorizedException(INVALID_REFRESH_TOKEN_MESSAGE);
+    }
+
+    const session = await this.parseRefreshSession(existingSession, redis);
+    const hashMatches = safeEqual(session.tokenHash, sha256(refreshToken));
+
+    if (!hashMatches || session.userId !== payload.sub) {
+      await redis.unwatch();
+      throw new UnauthorizedException(INVALID_REFRESH_TOKEN_MESSAGE);
+    }
+
+    const newJti = randomUUID();
+    const newTokens = await this.signTokens(payload.sub, newJti);
+    const ttlSeconds = Math.max(payload.exp - Math.floor(Date.now() / 1000), 1);
+    const userSessionSetKey = this.userSessionsKey(payload.sub);
+
+    const multi = redis.multi();
+    multi.del(refreshKey);
+    multi.set(usedKey, '1', 'EX', ttlSeconds);
+    multi.srem(userSessionSetKey, payload.jti);
+
+    await this.persistRefreshToken({
+      userId: payload.sub,
+      jti: newJti,
+      refreshToken: newTokens.refreshToken,
+      multi,
+    });
+
+    const execResult = await multi.exec();
+    if (!execResult) {
+      throw new UnauthorizedException('Refresh token rotation failed');
+    }
+
+    await this.usersService.writeAudit({
+      userId: payload.sub,
+      event: 'auth.refresh_success',
+      ...this.requestContextService.getAuditContext(request),
+      metadata: { oldJti: payload.jti, newJti },
+    });
+
+    return newTokens;
+  }
+
+  async logout(payload: JwtPayload, request: Request): Promise<void> {
+    const ttlSeconds = Math.max(payload.exp - Math.floor(Date.now() / 1000), 1);
+
+    await this.redisService.client
+      .multi()
+      .del(this.refreshKey(payload.jti))
+      .set(this.usedRefreshKey(payload.jti), '1', 'EX', ttlSeconds)
+      .srem(this.userSessionsKey(payload.sub), payload.jti)
+      .exec();
+
+    await this.usersService.writeAudit({
+      userId: payload.sub,
+      event: 'auth.logout',
+      ...this.requestContextService.getAuditContext(request),
+      metadata: { jti: payload.jti },
+    });
+  }
+
+  private async loginWithPassword(
     email: string,
     password: string,
     request: Request,
@@ -69,7 +187,6 @@ export class AuthService {
     const normalizedEmail = this.passwordService.normalizeEmail(email);
     const context = this.requestContextService.getAuditContext(request);
     const user = await this.usersService.findByEmail(normalizedEmail);
-
     const validPassword = await this.passwordService.verify(
       user?.passwordHash,
       password,
@@ -86,8 +203,7 @@ export class AuthService {
     }
 
     await this.resetBruteForceCounters(request, normalizedEmail);
-
-    const tokens = await this.issueTokenPair(user.id, request);
+    const tokens = await this.issueTokenPair(user.id);
 
     await this.usersService.writeAudit({
       userId: user.id,
@@ -98,118 +214,16 @@ export class AuthService {
     return tokens;
   }
 
-  async refresh(
-    payload: JwtPayload,
-    refreshToken: string,
-    request: Request,
+  private loginWithGoogle(
+    googleIdToken: string | undefined,
   ): Promise<AuthTokensDto> {
-    const refreshKey = this.refreshKey(payload.jti);
-    const usedKey = this.usedRefreshKey(payload.jti);
-    const redis = this.redisService.client;
-
-    const fingerprintHash = this.computeFingerprint(request);
-    if (!safeEqual(payload.fp, fingerprintHash)) {
-      throw new UnauthorizedException('Token fingerprint mismatch');
+    if (!googleIdToken) {
+      throw new BadRequestException('Missing google id token');
     }
 
-    await redis.watch(refreshKey);
-    const existingSession = await redis.get(refreshKey);
-
-    if (!existingSession) {
-      await redis.unwatch();
-      const used = await redis.exists(usedKey);
-
-      if (used) {
-        await this.handleRefreshReuseDetection(payload, request);
-      }
-
-      throw new UnauthorizedException('Refresh token is not valid');
-    }
-
-    let session: {
-      userId: string;
-      fp: string;
-      tokenHash: string;
-    };
-
-    try {
-      session = JSON.parse(existingSession) as {
-        userId: string;
-        fp: string;
-        tokenHash: string;
-      };
-    } catch {
-      await redis.unwatch();
-      throw new UnauthorizedException('Refresh token is not valid');
-    }
-
-    const tokenHash = sha256(refreshToken);
-    const fingerprintMatches = safeEqual(session.fp, fingerprintHash);
-    const hashMatches = safeEqual(session.tokenHash, tokenHash);
-
-    if (!fingerprintMatches || !hashMatches || session.userId !== payload.sub) {
-      await redis.unwatch();
-      throw new UnauthorizedException('Refresh token is not valid');
-    }
-
-    const newJti = randomUUID();
-    const newTokens = await this.signTokens(
-      payload.sub,
-      newJti,
-      fingerprintHash,
-    );
-
-    const ttlSeconds = Math.max(payload.exp - Math.floor(Date.now() / 1000), 1);
-    const userSessionSetKey = this.userSessionsKey(payload.sub);
-
-    const multi = redis.multi();
-    multi.del(refreshKey);
-    multi.set(usedKey, '1', 'EX', ttlSeconds);
-    multi.srem(userSessionSetKey, payload.jti);
-
-    await this.persistRefreshToken({
-      userId: payload.sub,
-      jti: newJti,
-      refreshToken: newTokens.refreshToken,
-      fingerprintHash,
-      multi,
-    });
-
-    const execResult = await multi.exec();
-
-    if (!execResult) {
-      throw new UnauthorizedException('Refresh token rotation failed');
-    }
-
-    await this.usersService.writeAudit({
-      userId: payload.sub,
-      event: 'auth.refresh_success',
-      ...this.requestContextService.getAuditContext(request),
-      metadata: { oldJti: payload.jti, newJti },
-    });
-
-    return newTokens;
-  }
-
-  async logout(payload: JwtPayload, request: Request): Promise<void> {
-    const redis = this.redisService.client;
-    const refreshKey = this.refreshKey(payload.jti);
-    const usedKey = this.usedRefreshKey(payload.jti);
-    const ttlSeconds = Math.max(payload.exp - Math.floor(Date.now() / 1000), 1);
-
-    await redis
-      .multi()
-      .del(refreshKey)
-      .set(usedKey, '1', 'EX', ttlSeconds)
-      .srem(this.userSessionsKey(payload.sub), payload.jti)
-      .exec();
-
-    await this.usersService.writeAudit({
-      userId: payload.sub,
-      event: 'auth.logout',
-      ...this.requestContextService.getAuditContext(request),
-      metadata: { jti: payload.jti },
-    });
+    // Placeholder for next step:
+    // verify Google ID token, upsert local user, then issue token pair.
+    throw new BadRequestException('Google login is not configured yet');
   }
 
   private async handleRefreshReuseDetection(
@@ -219,7 +233,6 @@ export class AuthService {
     this.logger.warn(`Refresh token replay detected for user ${payload.sub}`);
 
     await this.revokeAllSessionsForUser(payload.sub);
-
     await this.usersService.writeAudit({
       userId: payload.sub,
       event: 'auth.refresh_reuse_detected',
@@ -230,19 +243,14 @@ export class AuthService {
     throw new UnauthorizedException('Refresh token reuse detected');
   }
 
-  private async issueTokenPair(
-    userId: string,
-    request: Request,
-  ): Promise<AuthTokensDto> {
+  private async issueTokenPair(userId: string): Promise<AuthTokensDto> {
     const jti = randomUUID();
-    const fingerprintHash = this.computeFingerprint(request);
-    const tokens = await this.signTokens(userId, jti, fingerprintHash);
+    const tokens = await this.signTokens(userId, jti);
 
     await this.persistRefreshToken({
       userId,
       jti,
       refreshToken: tokens.refreshToken,
-      fingerprintHash,
     });
 
     return tokens;
@@ -251,35 +259,26 @@ export class AuthService {
   private async signTokens(
     userId: string,
     refreshJti: string,
-    fingerprintHash: string,
   ): Promise<AuthTokensDto> {
     const { jwt } = this.appConfigService;
 
-    const accessPayload = {
-      sub: userId,
-      jti: randomUUID(),
-      fp: fingerprintHash,
-      type: 'access' as const,
-    };
-
-    const refreshPayload = {
-      sub: userId,
-      jti: refreshJti,
-      fp: fingerprintHash,
-      type: 'refresh' as const,
-    };
-
     const [accessToken, refreshToken] = await Promise.all([
-      this.jwtService.signAsync(accessPayload, {
-        privateKey: jwt.accessPrivateKey,
-        algorithm: 'RS256',
-        expiresIn: jwt.accessExpiresInSeconds,
-      }),
-      this.jwtService.signAsync(refreshPayload, {
-        privateKey: jwt.refreshPrivateKey,
-        algorithm: 'RS256',
-        expiresIn: jwt.refreshExpiresInSeconds,
-      }),
+      this.jwtService.signAsync(
+        { sub: userId, jti: randomUUID(), type: 'access' as const },
+        {
+          privateKey: jwt.accessPrivateKey,
+          algorithm: 'RS256',
+          expiresIn: jwt.accessExpiresInSeconds,
+        },
+      ),
+      this.jwtService.signAsync(
+        { sub: userId, jti: refreshJti, type: 'refresh' as const },
+        {
+          privateKey: jwt.refreshPrivateKey,
+          algorithm: 'RS256',
+          expiresIn: jwt.refreshExpiresInSeconds,
+        },
+      ),
     ]);
 
     return {
@@ -294,18 +293,13 @@ export class AuthService {
     userId: string;
     jti: string;
     refreshToken: string;
-    fingerprintHash: string;
     multi?: RedisMultiLike;
   }): Promise<void> {
-    const { userId, jti, refreshToken, fingerprintHash, multi } = params;
+    const { userId, jti, refreshToken, multi } = params;
     const refreshKey = this.refreshKey(jti);
     const userSessionSetKey = this.userSessionsKey(userId);
     const ttl = this.appConfigService.jwt.refreshExpiresInSeconds;
-    const value = JSON.stringify({
-      userId,
-      fp: fingerprintHash,
-      tokenHash: sha256(refreshToken),
-    });
+    const value = JSON.stringify({ userId, tokenHash: sha256(refreshToken) });
 
     if (multi) {
       multi.set(refreshKey, value, 'EX', ttl);
@@ -345,17 +339,30 @@ export class AuthService {
     request: Request,
     email: string,
   ): Promise<void> {
-    const ipKey = `auth:bruteforce:ip:${sha256(this.requestContextService.getIp(request))}`;
-    const emailKey = `auth:bruteforce:email:${sha256(email)}`;
-
+    const { ipKey, emailKey } = this.bruteForceKeys(request, email);
     await this.redisService.client.del(ipKey, emailKey);
   }
 
-  private computeFingerprint(request: Request): string {
-    return this.requestContextService.computeFingerprint(
-      request,
-      this.appConfigService.jwt.fingerprintSecret,
-    );
+  private bruteForceKeys(
+    request: Request,
+    email: string,
+  ): { ipKey: string; emailKey: string } {
+    return {
+      ipKey: `auth:bruteforce:ip:${sha256(this.requestContextService.getIp(request))}`,
+      emailKey: `auth:bruteforce:email:${sha256(email)}`,
+    };
+  }
+
+  private async parseRefreshSession(
+    session: string,
+    redis: { unwatch(): Promise<unknown> },
+  ): Promise<RefreshSession> {
+    try {
+      return JSON.parse(session) as RefreshSession;
+    } catch {
+      await redis.unwatch();
+      throw new UnauthorizedException(INVALID_REFRESH_TOKEN_MESSAGE);
+    }
   }
 
   private refreshKey(jti: string): string {
@@ -368,5 +375,14 @@ export class AuthService {
 
   private userSessionsKey(userId: string): string {
     return `auth:user_refresh:${userId}`;
+  }
+
+  private toAuthMe(user: UserEntity): AuthMeDto {
+    return {
+      id: user.id,
+      email: user.email,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
   }
 }

@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import type { Request } from 'express';
-import { sha256 } from '../../../common/utils/crypto.util';
 
 @Injectable()
 export class RequestContextService {
@@ -18,11 +17,5 @@ export class RequestContextService {
       ip: this.getIp(request),
       userAgent: this.getUserAgent(request),
     };
-  }
-
-  computeFingerprint(request: Request, secret: string): string {
-    return sha256(
-      `${secret}|${this.getIp(request)}|${this.getUserAgent(request)}`,
-    );
   }
 }

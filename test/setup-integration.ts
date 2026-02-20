@@ -41,7 +41,6 @@ setDefaultEnv('JWT_REFRESH_PRIVATE_KEY', refreshKeyPair.privateKey);
 setDefaultEnv('JWT_REFRESH_PUBLIC_KEY', refreshKeyPair.publicKey);
 setDefaultEnv('JWT_ACCESS_EXPIRES_IN', '15m');
 setDefaultEnv('JWT_REFRESH_EXPIRES_IN', '7d');
-setDefaultEnv('JWT_FINGERPRINT_SECRET', 'integration-test-fingerprint-secret');
 
 setDefaultEnv('LOGIN_RATE_LIMIT_MAX_ATTEMPTS', '5');
 setDefaultEnv('LOGIN_RATE_LIMIT_WINDOW_SECONDS', '900');

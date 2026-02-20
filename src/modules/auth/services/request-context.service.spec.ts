@@ -11,7 +11,7 @@ describe('RequestContextService', () => {
     expect(service.getUserAgent(request)).toBe('unknown');
   });
 
-  it('builds audit context and fingerprint', () => {
+  it('builds audit context', () => {
     const request = {
       ip: '127.0.0.1',
       headers: { 'user-agent': 'jest-agent' },
@@ -19,8 +19,5 @@ describe('RequestContextService', () => {
 
     const context = service.getAuditContext(request);
     expect(context).toEqual({ ip: '127.0.0.1', userAgent: 'jest-agent' });
-    expect(service.computeFingerprint(request, 'secret-1')).not.toBe(
-      service.computeFingerprint(request, 'secret-2'),
-    );
   });
 });

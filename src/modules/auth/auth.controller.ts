@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Post,
@@ -12,9 +13,11 @@ import type { Request } from 'express';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { LoginRateLimitGuard } from '../../common/guards/login-rate-limit.guard';
 import { AuthService } from './auth.service';
+import { AuthMeDto } from './dto/auth-me.dto';
 import { AuthTokensDto } from './dto/auth-tokens.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { AccessTokenGuard } from './guards/access-token.guard';
 import { RefreshTokenGuard } from './guards/refresh-token.guard';
 import type { JwtPayload } from './types/jwt-payload.type';
 
@@ -41,7 +44,13 @@ export class AuthController {
     @Body() body: LoginDto,
     @Req() request: Request,
   ): Promise<AuthTokensDto> {
-    return this.authService.login(body.email, body.password, request);
+    return this.authService.loginByProvider(body, request);
+  }
+
+  @UseGuards(AccessTokenGuard)
+  @Get('me')
+  async me(@CurrentUser() payload: JwtPayload): Promise<AuthMeDto> {
+    return this.authService.me(payload);
   }
 
   @UseGuards(RefreshTokenGuard)

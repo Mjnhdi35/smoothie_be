@@ -85,7 +85,6 @@ export class AppConfigService {
     refreshExpiresIn: string;
     accessExpiresInSeconds: number;
     refreshExpiresInSeconds: number;
-    fingerprintSecret: string;
   } {
     const accessExpiresIn = this.get('JWT_ACCESS_EXPIRES_IN');
     const refreshExpiresIn = this.get('JWT_REFRESH_EXPIRES_IN');
@@ -99,7 +98,6 @@ export class AppConfigService {
       refreshExpiresIn,
       accessExpiresInSeconds: durationToSeconds(accessExpiresIn),
       refreshExpiresInSeconds: durationToSeconds(refreshExpiresIn),
-      fingerprintSecret: this.get('JWT_FINGERPRINT_SECRET'),
     };
   }
 

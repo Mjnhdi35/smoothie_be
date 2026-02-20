@@ -22,6 +22,7 @@ describe('AuthService', () => {
   const writeAudit = jest.fn();
   const usersService = {
     findByEmail,
+    findById: jest.fn(),
     createUserWithAudit,
     writeAudit,
   } as unknown as UsersService;
@@ -64,7 +65,6 @@ describe('AuthService', () => {
       refreshExpiresIn: '7d',
       accessExpiresInSeconds: 900,
       refreshExpiresInSeconds: 604800,
-      fingerprintSecret: 'fingerprint-secret',
     },
   } as AppConfigService;
 
@@ -77,7 +77,6 @@ describe('AuthService', () => {
   const requestContextService = {
     getAuditContext: jest.fn(),
     getIp: jest.fn(),
-    computeFingerprint: jest.fn(),
   } as unknown as RequestContextService;
 
   const service = new AuthService(
@@ -104,10 +103,6 @@ describe('AuthService', () => {
       ip: '127.0.0.1',
       userAgent: 'jest-agent',
     });
-    (requestContextService.computeFingerprint as jest.Mock).mockReturnValue(
-      'fp-hash',
-    );
-
     findByEmail.mockResolvedValue(null);
     createUserWithAudit.mockResolvedValue({
       id: 'user-1',
@@ -168,7 +163,14 @@ describe('AuthService', () => {
     (passwordService.verify as jest.Mock).mockResolvedValue(false);
 
     await expect(
-      service.login('alice@example.com', 'wrong-password', makeRequest()),
+      service.loginByProvider(
+        {
+          provider: 'password',
+          email: 'alice@example.com',
+          password: 'wrong-password',
+        },
+        makeRequest(),
+      ),
     ).rejects.toBeInstanceOf(UnauthorizedException);
 
     expect(writeAudit).toHaveBeenCalledWith(
@@ -188,10 +190,6 @@ describe('AuthService', () => {
       userAgent: 'jest-agent',
     });
     (requestContextService.getIp as jest.Mock).mockReturnValue('127.0.0.1');
-    (requestContextService.computeFingerprint as jest.Mock).mockReturnValue(
-      'fp-hash',
-    );
-
     findByEmail.mockResolvedValue({
       id: 'user-1',
       passwordHash: 'stored-hash',
@@ -201,9 +199,12 @@ describe('AuthService', () => {
       .mockResolvedValueOnce('access-token')
       .mockResolvedValueOnce('refresh-token');
 
-    await service.login(
-      'alice@example.com',
-      'strong-password-123',
+    await service.loginByProvider(
+      {
+        provider: 'password',
+        email: 'alice@example.com',
+        password: 'strong-password-123',
+      },
       makeRequest(),
     );
 
@@ -216,22 +217,58 @@ describe('AuthService', () => {
     );
   });
 
-  it('rejects refresh when fingerprint mismatches', async () => {
-    (requestContextService.computeFingerprint as jest.Mock).mockReturnValue(
-      'actual-fp',
-    );
-
+  it('rejects refresh when token hash mismatches', async () => {
     const payload = {
       sub: 'user-1',
       jti: 'jti-1',
-      fp: 'token-fp',
       type: 'refresh',
       iat: 1,
-      exp: 2,
+      exp: Math.floor(Date.now() / 1000) + 3600,
     } as JwtPayload;
+
+    redisClient.watch.mockResolvedValue(undefined);
+    redisClient.get.mockResolvedValue(
+      JSON.stringify({ userId: 'user-1', tokenHash: 'wrong-hash' }),
+    );
+    redisClient.unwatch.mockResolvedValue(undefined);
 
     await expect(
       service.refresh(payload, 'refresh-token', makeRequest()),
     ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('rejects google login when not configured', async () => {
+    await expect(
+      service.loginByProvider(
+        { provider: 'google', googleIdToken: 'dummy-google-id-token-value' },
+        makeRequest(),
+      ),
+    ).rejects.toThrow('Google login is not configured yet');
+  });
+
+  it('returns current user profile for me', async () => {
+    const user = {
+      id: 'user-1',
+      email: 'alice@example.com',
+      passwordHash: 'hash',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+    };
+    (usersService.findById as jest.Mock).mockResolvedValue(user);
+
+    await expect(
+      service.me({
+        sub: 'user-1',
+        jti: 'jti-1',
+        type: 'access',
+        iat: 1,
+        exp: 2,
+      }),
+    ).resolves.toEqual({
+      id: 'user-1',
+      email: 'alice@example.com',
+      createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+    });
   });
 });
