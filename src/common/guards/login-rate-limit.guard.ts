@@ -4,6 +4,7 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
 } from '@nestjs/common';
 import type { Request } from 'express';
 import { AppConfigService } from '../../config/app-config.service';
@@ -12,6 +13,8 @@ import { RedisService } from '../../infrastructure/redis/redis.service';
 
 @Injectable()
 export class LoginRateLimitGuard implements CanActivate {
+  private readonly logger = new Logger(LoginRateLimitGuard.name);
+
   constructor(
     private readonly redisService: RedisService,
     private readonly appConfigService: AppConfigService,
@@ -27,10 +30,22 @@ export class LoginRateLimitGuard implements CanActivate {
     const ipKey = `auth:bruteforce:ip:${sha256(ip)}`;
     const emailKey = `auth:bruteforce:email:${sha256(email.toLowerCase())}`;
 
-    const [ipAttempts, emailAttempts] = await Promise.all([
-      this.incrementCounter(ipKey, windowSeconds),
-      this.incrementCounter(emailKey, windowSeconds),
-    ]);
+    let ipAttempts: number;
+    let emailAttempts: number;
+    try {
+      [ipAttempts, emailAttempts] = await Promise.all([
+        this.incrementCounter(ipKey, windowSeconds),
+        this.incrementCounter(emailKey, windowSeconds),
+      ]);
+    } catch (error) {
+      if (this.isRedisOperationalError(error)) {
+        this.logger.warn(
+          `Skipping login rate limit due to Redis error: ${this.errorMessage(error)}`,
+        );
+        return true;
+      }
+      throw error;
+    }
 
     if (ipAttempts > maxAttempts || emailAttempts > maxAttempts) {
       throw new HttpException(
@@ -60,5 +75,20 @@ export class LoginRateLimitGuard implements CanActivate {
     }
 
     return count;
+  }
+
+  private isRedisOperationalError(error: unknown): boolean {
+    const message = this.errorMessage(error);
+    return (
+      message.includes('NOPERM') ||
+      message.includes('NOAUTH') ||
+      message.includes('ECONNREFUSED') ||
+      message.includes('ETIMEDOUT') ||
+      message.includes('EAI_AGAIN')
+    );
+  }
+
+  private errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
   }
 }
