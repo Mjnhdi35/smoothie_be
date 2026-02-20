@@ -87,10 +87,8 @@ export class AppConfigService {
   }
 
   get jwt(): {
-    accessPrivateKey: string;
-    accessPublicKey: string;
-    refreshPrivateKey: string;
-    refreshPublicKey: string;
+    accessSecret: string;
+    refreshSecret: string;
     issuer: string;
     audience: string;
     accessExpiresIn: string;
@@ -102,10 +100,8 @@ export class AppConfigService {
     const refreshExpiresIn = this.get('JWT_REFRESH_EXPIRES_IN');
 
     return {
-      accessPrivateKey: this.normalizePem(this.get('JWT_ACCESS_PRIVATE_KEY')),
-      accessPublicKey: this.normalizePem(this.get('JWT_ACCESS_PUBLIC_KEY')),
-      refreshPrivateKey: this.normalizePem(this.get('JWT_REFRESH_PRIVATE_KEY')),
-      refreshPublicKey: this.normalizePem(this.get('JWT_REFRESH_PUBLIC_KEY')),
+      accessSecret: this.get('JWT_ACCESS_SECRET'),
+      refreshSecret: this.get('JWT_REFRESH_SECRET'),
       issuer: this.getOptional('JWT_ISSUER') ?? 'api-smoothie',
       audience: this.getOptional('JWT_AUDIENCE') ?? 'api-smoothie-users',
       accessExpiresIn,
@@ -139,7 +135,4 @@ export class AppConfigService {
     return value && value.trim().length > 0 ? value : undefined;
   }
 
-  private normalizePem(value: string): string {
-    return value.replace(/\\n/g, '\n');
-  }
 }

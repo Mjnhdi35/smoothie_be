@@ -270,8 +270,8 @@ export class AuthService {
       this.jwtService.signAsync(
         { jti: randomUUID(), type: 'access' as const },
         {
-          privateKey: jwt.accessPrivateKey,
-          algorithm: 'RS256',
+          secret: jwt.accessSecret,
+          algorithm: 'HS256',
           expiresIn: jwt.accessExpiresInSeconds,
           subject: userId,
           issuer: jwt.issuer,
@@ -281,8 +281,8 @@ export class AuthService {
       this.jwtService.signAsync(
         { jti: refreshJti, type: 'refresh' as const },
         {
-          privateKey: jwt.refreshPrivateKey,
-          algorithm: 'RS256',
+          secret: jwt.refreshSecret,
+          algorithm: 'HS256',
           expiresIn: jwt.refreshExpiresInSeconds,
           subject: userId,
           issuer: jwt.issuer,

@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 
 function setDefaultEnv(key: string, value: string): void {
   if (!process.env[key] || process.env[key]?.trim().length === 0) {
@@ -6,17 +6,8 @@ function setDefaultEnv(key: string, value: string): void {
   }
 }
 
-const accessKeyPair = generateKeyPairSync('rsa', {
-  modulusLength: 2048,
-  publicKeyEncoding: { type: 'spki', format: 'pem' },
-  privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-});
-
-const refreshKeyPair = generateKeyPairSync('rsa', {
-  modulusLength: 2048,
-  publicKeyEncoding: { type: 'spki', format: 'pem' },
-  privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-});
+const accessSecret = randomUUID();
+const refreshSecret = randomUUID();
 
 setDefaultEnv('NODE_ENV', 'test');
 setDefaultEnv('PORT', '3001');
@@ -35,10 +26,8 @@ setDefaultEnv('REDIS_USERNAME', 'default');
 setDefaultEnv('REDIS_PASSWORD', 'smoothie_redis_pass');
 setDefaultEnv('REDIS_TLS', 'false');
 
-setDefaultEnv('JWT_ACCESS_PRIVATE_KEY', accessKeyPair.privateKey);
-setDefaultEnv('JWT_ACCESS_PUBLIC_KEY', accessKeyPair.publicKey);
-setDefaultEnv('JWT_REFRESH_PRIVATE_KEY', refreshKeyPair.privateKey);
-setDefaultEnv('JWT_REFRESH_PUBLIC_KEY', refreshKeyPair.publicKey);
+setDefaultEnv('JWT_ACCESS_SECRET', accessSecret);
+setDefaultEnv('JWT_REFRESH_SECRET', refreshSecret);
 setDefaultEnv('JWT_ACCESS_EXPIRES_IN', '15m');
 setDefaultEnv('JWT_REFRESH_EXPIRES_IN', '7d');
 

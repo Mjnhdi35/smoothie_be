@@ -57,10 +57,8 @@ describe('AuthService', () => {
 
   const appConfigService = {
     jwt: {
-      accessPrivateKey: 'access-private',
-      accessPublicKey: 'access-public',
-      refreshPrivateKey: 'refresh-private',
-      refreshPublicKey: 'refresh-public',
+      accessSecret: 'access-secret',
+      refreshSecret: 'refresh-secret',
       issuer: 'api-smoothie',
       audience: 'api-smoothie-users',
       accessExpiresIn: '15m',

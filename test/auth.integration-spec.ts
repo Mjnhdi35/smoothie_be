@@ -81,8 +81,8 @@ describe('Auth Integration', () => {
     const firstPayload = await jwtService.verifyAsync<JwtPayload>(
       loginTokens.refreshToken,
       {
-        publicKey: appConfigService.jwt.refreshPublicKey,
-        algorithms: ['RS256'],
+        secret: appConfigService.jwt.refreshSecret,
+        algorithms: ['HS256'],
         issuer: appConfigService.jwt.issuer,
         audience: appConfigService.jwt.audience,
       },
@@ -111,8 +111,8 @@ describe('Auth Integration', () => {
     const payload = await jwtService.verifyAsync<JwtPayload>(
       tokens.refreshToken,
       {
-        publicKey: appConfigService.jwt.refreshPublicKey,
-        algorithms: ['RS256'],
+        secret: appConfigService.jwt.refreshSecret,
+        algorithms: ['HS256'],
         issuer: appConfigService.jwt.issuer,
         audience: appConfigService.jwt.audience,
       },

@@ -5,7 +5,7 @@ Production-grade authentication module built with NestJS 11, Express adapter, Kn
 ## Features
 
 - Clean module separation (`auth`, `users`, `infrastructure`, `common`, `config`)
-- RS256 JWT access (15m) + refresh (7d)
+- HS256 JWT access (15m) + refresh (7d)
 - Redis-backed refresh sessions (`auth:refresh:<jti>`) with rotation and reuse detection
 - Brute-force protection and login rate limiting via Redis counters
 - Bcrypt password hashing

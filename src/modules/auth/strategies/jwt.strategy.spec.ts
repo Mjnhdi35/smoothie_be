@@ -10,7 +10,7 @@ describe('JwtStrategy', () => {
 
   const appConfigService = {
     jwt: {
-      accessPublicKey: 'access-public-key',
+      accessSecret: 'access-secret',
       issuer: 'api-smoothie',
       audience: 'api-smoothie-users',
     },

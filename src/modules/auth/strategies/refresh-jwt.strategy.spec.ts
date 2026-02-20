@@ -11,7 +11,7 @@ describe('RefreshJwtStrategy', () => {
 
   const appConfigService = {
     jwt: {
-      refreshPublicKey: 'refresh-public-key',
+      refreshSecret: 'refresh-secret',
       issuer: 'api-smoothie',
       audience: 'api-smoothie-users',
     },
