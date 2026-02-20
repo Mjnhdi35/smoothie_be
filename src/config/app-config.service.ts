@@ -134,5 +134,4 @@ export class AppConfigService {
     const value = this.configService.get<string>(key);
     return value && value.trim().length > 0 ? value : undefined;
   }
-
 }
